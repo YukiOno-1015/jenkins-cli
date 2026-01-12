@@ -122,10 +122,10 @@ def call(Map cfg = [:]) {
                 echo "❌ Build FAILED - check console logs for details"
             }
             cleanup {
-                cleanWs(
-                    deleteDirs: true,
-                    disableDeferredWipeout: true
-                )
+                script {
+                    // deleteDir avoids filesystem lock issues seen with cleanWs on .git/HEAD
+                    deleteDir()
+                }
             }
         }
     }
