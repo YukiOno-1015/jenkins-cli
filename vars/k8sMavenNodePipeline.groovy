@@ -122,9 +122,15 @@ def call(Map cfg = [:]) {
                 echo "❌ Build FAILED - check console logs for details"
             }
             cleanup {
-                script {
-                    // deleteDir avoids filesystem lock issues seen with cleanWs on .git/HEAD
-                    deleteDir()
+                container('build') {
+                    // make files writable to avoid "Operation not permitted" during recursive delete
+                    sh """#!/bin/bash
+                      set -euo pipefail
+                      chmod -R u+w . || true
+                    """
+                    script {
+                        deleteDir()
+                    }
                 }
             }
         }
