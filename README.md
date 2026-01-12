@@ -8,8 +8,17 @@ Jenkins 用の共有ライブラリとパイプライン定義を提供するプ
 - [プロジェクト構成](#プロジェクト構成)
 - [前提条件](#前提条件)
 - [セットアップ](#セットアップ)
+  - [1. Shared Library として登録](#1-shared-library-として登録)
+  - [2. Kubernetes 環境の準備](#2-kubernetes-環境の準備)
+  - [3. 認証情報の登録](#3-認証情報の登録)
 - [使用方法](#使用方法)
+  - [gitCloneSsh](#gitclonessh)
+  - [k8sPodYaml](#k8spodyaml)
+  - [k8sMavenNodePipeline](#k8smavennodepipeline)
 - [設定](#設定)
+  - [Cloudflare Allowlist 自動更新](#cloudflare-allowlist-自動更新)
+- [トラブルシューティング](#トラブルシューティング)
+- [変更履歴](#変更履歴)
 
 ## 機能
 
@@ -53,9 +62,35 @@ jenkins-cli/
 
 ### Jenkins 環境
 
-- Jenkins 2.x 以上
-- Kubernetes Plugin がインストール済み
-- SSH Agent Plugin がインストール済み
+**必須バージョン:**
+
+- Jenkins 2.x 以上（推奨: 2.400+）
+
+**必須プラグイン:**
+
+以下のプラグインがインストールされている必要があります：
+
+| プラグイン名        | ID                  | 説明                      | 必須理由                           |
+| ------------------- | ------------------- | ------------------------- | ---------------------------------- |
+| Pipeline            | workflow-aggregator | パイプライン機能の基本    | Declarative/Scripted Pipeline 実行 |
+| Git                 | git                 | Git リポジトリとの連携    | ソースコード管理                   |
+| SSH Agent           | ssh-agent           | SSH 認証の管理            | GitHub SSH 接続                    |
+| Kubernetes          | kubernetes          | Kubernetes 上でビルド実行 | K8s Pod エージェント起動           |
+| Credentials Binding | credentials-binding | 認証情報のバインディング  | パイプラインでの認証情報使用       |
+| Timestamper         | timestamper         | ログにタイムスタンプ追加  | デバッグ用（オプション）           |
+
+**プラグインのインストール方法:**
+
+1. **Manage Jenkins** → **Manage Plugins** → **Available plugins**
+2. 上記プラグインを検索してチェック
+3. **Install without restart**（または**Download now and install after restart**）をクリック
+
+または、Jenkins CLI でインストール：
+
+```bash
+# Jenkins CLI を使用したプラグインインストール
+jenkins-cli install-plugin workflow-aggregator git ssh-agent kubernetes credentials-binding timestamper
+```
 
 ### Kubernetes 環境
 
@@ -67,13 +102,13 @@ jenkins-cli/
 
 以下の認証情報を Jenkins に登録する必要があります：
 
-| ID                        | 種別                          | 説明                       | 使用箇所                 |
-| ------------------------- | ----------------------------- | -------------------------- | ------------------------ |
-| `github-ssh`              | SSH Username with private key | GitHub SSH 認証鍵          | portalAppPipeline        |
-| `JQIT_ONO`                | SSH Username with private key | GitHub SSH 認証鍵（代替）  | portalAppBackEndPipeline |
-| `dockerhub-jenkins-agent` | Secret file                   | Docker Hub imagePullSecret | k8sPodYaml               |
-| `CF_API_TOKEN`            | Secret text                   | Cloudflare API トークン    | declarative-pipeline     |
-| `CF_ZONE_ID`              | Secret text                   | Cloudflare ゾーン ID       | declarative-pipeline     |
+| ID                        | 種別                          | 登録先     | 説明                       | 使用箇所                 |
+| ------------------------- | ----------------------------- | ---------- | -------------------------- | ------------------------ |
+| `github-ssh`              | SSH Username with private key | Jenkins    | GitHub SSH 認証鍵          | portalAppPipeline        |
+| `JQIT_ONO`                | SSH Username with private key | Jenkins    | GitHub SSH 認証鍵（代替）  | portalAppBackEndPipeline |
+| `dockerhub-jenkins-agent` | docker-registry Secret        | Kubernetes | Docker Hub imagePullSecret | k8sPodYaml               |
+| `CF_API_TOKEN`            | Secret text                   | Jenkins    | Cloudflare API トークン    | declarative-pipeline     |
+| `CF_ZONE_ID`              | Secret text                   | Jenkins    | Cloudflare ゾーン ID       | declarative-pipeline     |
 
 ## セットアップ
 
@@ -83,21 +118,58 @@ Jenkins 管理画面で以下の設定を行います：
 
 1. **Manage Jenkins** → **Configure System** → **Global Pipeline Libraries**
 2. 以下の情報を入力：
-   - Name: `jqit-lib`（任意の名前）
-   - Default version: `main`
-   - Retrieval method: **Modern SCM**
-   - Source Code Management: **Git**
-   - Project Repository: このリポジトリの URL
+   - **Name**: `jqit-lib`（任意の名前、パイプラインで`@Library`に使用）
+   - **Default version**: `main`（使用するブランチ）
+   - **Retrieval method**: **Modern SCM**
+   - **Source Code Management**: **Git**
+   - **Project Repository**: `https://github.com/YukiOno-1015/jenkins-cli.git`
+   - **Credentials**: （プライベートリポジトリの場合のみ必要）
+3. **Save**をクリック
 
-### 2. Kubernetes Cloud 設定
+### 2. Kubernetes 環境の準備
+
+#### 2.1 Namespace の作成（未作成の場合）
+
+```bash
+kubectl create namespace jenkins
+```
+
+#### 2.2 Docker Hub imagePullSecret の作成
+
+プライベートイメージを使用する場合のみ必要です：
+
+```bash
+# Docker Hub の認証情報を使ってKubernetesシークレットを作成
+kubectl create secret docker-registry dockerhub-jenkins-agent \
+  --docker-server=https://index.docker.io/v1/ \
+  --docker-username=<your-dockerhub-username> \
+  --docker-password=<your-dockerhub-password> \
+  --docker-email=<your-email> \
+  --namespace=jenkins
+
+# 作成確認
+kubectl get secret dockerhub-jenkins-agent -n jenkins
+```
+
+**注意**: パブリックイメージのみ使用する場合、この手順はスキップできます。
+
+#### 2.3 Jenkins Kubernetes Cloud 設定
 
 1. **Manage Jenkins** → **Configure System** → **Cloud**
 2. **Add a new cloud** → **Kubernetes**
-3. Kubernetes 接続情報を設定
+3. 以下を設定：
+   - **Name**: `kubernetes`
+   - **Kubernetes URL**: Kubernetes クラスタのエンドポイント（空欄で自動検出）
+   - **Kubernetes Namespace**: `jenkins`
+   - **Credentials**: Kubernetes への接続に必要な場合のみ
+   - **Jenkins URL**: Jenkins 自身の URL（例: `http://jenkins-svc:8080`）
+   - **Jenkins tunnel**: （オプション）JNLP 接続用
+4. **Test Connection**で接続を確認
+5. **Save**をクリック
 
 ### 3. 認証情報の登録
 
-**GitHub SSH 認証鍵:**
+#### 3.1 GitHub SSH 認証鍵
 
 ```
 Manage Jenkins → Manage Credentials → Add Credentials
@@ -105,6 +177,24 @@ Manage Jenkins → Manage Credentials → Add Credentials
 - ID: github-ssh
 - Username: git
 - Private Key: （GitHub用の秘密鍵を入力）
+```
+
+**Docker Hub imagePullSecret:**
+
+```bash
+# 1. Docker Hub の認証情報を使ってKubernetesシークレットを作成
+kubectl create secret docker-registry dockerhub-jenkins-agent \
+  --docker-server=https://index.docker.io/v1/ \
+  --docker-username=<your-dockerhub-username> \
+  --docker-password=<your-dockerhub-password> \
+  --docker-email=<your-email> \
+  --namespace=jenkins
+
+# 2. シークレットが作成されたことを確認
+kubectl get secret dockerhub-jenkins-agent -n jenkins
+
+# 注意: プライベートイメージを使用しない場合、この設定は不要です
+# パブリックイメージのみ使用する場合は、k8sPodYamlのimagePullSecretパラメータを空文字列に設定できます
 ```
 
 **Cloudflare 認証情報:**
