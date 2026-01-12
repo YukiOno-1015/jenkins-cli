@@ -6,6 +6,7 @@ pipeline {
     HOSTNAME = 'jenkins-svc.sk4869.info'
     RULE_DESC = 'allowlist-jenkins-svc'
     IP_SOURCE_URL = 'https://ifconfig.me'
+    SCRIPT_PATH = "${WORKSPACE}/scripts/cf_update_jenkins_allowlist.sh"
   }
 
   stages {
@@ -17,8 +18,14 @@ pipeline {
         ]) {
           sh '''
             set -euo pipefail
-            chmod +x /Volumes/HDD/work/jenkins-cli/cf_update_jenkins_allowlist.sh
-            /Volumes/HDD/work/jenkins-cli/cf_update_jenkins_allowlist.sh
+            
+            if [ ! -f "${SCRIPT_PATH}" ]; then
+              echo "ERROR: Script not found at ${SCRIPT_PATH}"
+              exit 1
+            fi
+            
+            chmod +x "${SCRIPT_PATH}"
+            "${SCRIPT_PATH}"
           '''
         }
       }
@@ -26,8 +33,11 @@ pipeline {
   }
 
   post {
+    success {
+      echo 'Cloudflare allowlist updated successfully'
+    }
     failure {
-      echo 'Cloudflare allowlist update failed. Check console log.'
+      echo 'Cloudflare allowlist update failed. Check console log for details.'
     }
   }
 }
