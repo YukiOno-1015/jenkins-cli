@@ -123,13 +123,22 @@ def call(Map cfg = [:]) {
             }
             cleanup {
                 container('build') {
-                    // make files writable to avoid "Operation not permitted" during recursive delete
+                    // soften permissions/ownership so workspace cleanup can proceed
                     sh """#!/bin/bash
                       set -euo pipefail
-                      chmod -R u+w . || true
+                      chown -R \"$(id -u)\":\"$(id -g)\" . || true
+                      chmod -R u+rwX . || true
                     """
                     script {
-                        deleteDir()
+                        try {
+                            deleteDir()
+                        } catch (err) {
+                            echo "deleteDir() failed (${err}); fallback to rm -rf"
+                            sh """#!/bin/bash
+                              set -euo pipefail
+                              rm -rf -- ./* ./.??* || true
+                            """
+                        }
                     }
                 }
             }
