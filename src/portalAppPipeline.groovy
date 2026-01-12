@@ -9,5 +9,5 @@ k8sMavenNodePipeline(
   gitSshCredentialsId: 'JQIT_ONO',
   mavenProfileChoices: ['dev', 'prod'],
   mavenDefaultProfile: 'dev',
-  archivePattern: 'repo/portal-app/target/portalApp*.jar'
+  archivePattern: '**/target/*.jar'
 )
