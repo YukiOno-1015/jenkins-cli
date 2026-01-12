@@ -124,11 +124,11 @@ def call(Map cfg = [:]) {
             cleanup {
                 container('build') {
                     // soften permissions/ownership so workspace cleanup can proceed
-                    sh """#!/bin/bash
+                    sh '''#!/bin/bash
                       set -euo pipefail
-                      chown -R \"$(id -u)\":\"$(id -g)\" . || true
+                      chown -R "$(id -u)":"$(id -g)" . || true
                       chmod -R u+rwX . || true
-                    """
+                    '''
                     script {
                         try {
                             deleteDir()
