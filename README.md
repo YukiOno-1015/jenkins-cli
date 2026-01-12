@@ -70,15 +70,15 @@ jenkins-cli/
 
 以下のプラグインがインストールされている必要があります：
 
-| プラグイン名           | ID                  | 説明                      | 必須理由                           |
-| ---------------------- | ------------------- | ------------------------- | ---------------------------------- |
-| Pipeline               | workflow-aggregator | パイプライン機能の基本    | Declarative/Scripted Pipeline 実行 |
-| Git                    | git                 | Git リポジトリとの連携    | ソースコード管理                   |
-| SSH Agent              | ssh-agent           | SSH 認証の管理            | GitHub SSH 接続                    |
-| Kubernetes             | kubernetes          | Kubernetes 上でビルド実行 | K8s Pod エージェント起動           |
-| Credentials Binding    | credentials-binding | 認証情報のバインディング  | パイプラインでの認証情報使用       |
-| Workspace Cleanup      | ws-cleanup          | ワークスペースのクリーンアップ | `cleanWs()` メソッド使用           |
-| Timestamper            | timestamper         | ログにタイムスタンプ追加  | デバッグ用（オプション）           |
+| プラグイン名        | ID                  | 説明                           | 必須理由                           |
+| ------------------- | ------------------- | ------------------------------ | ---------------------------------- |
+| Pipeline            | workflow-aggregator | パイプライン機能の基本         | Declarative/Scripted Pipeline 実行 |
+| Git                 | git                 | Git リポジトリとの連携         | ソースコード管理                   |
+| SSH Agent           | ssh-agent           | SSH 認証の管理                 | GitHub SSH 接続                    |
+| Kubernetes          | kubernetes          | Kubernetes 上でビルド実行      | K8s Pod エージェント起動           |
+| Credentials Binding | credentials-binding | 認証情報のバインディング       | パイプラインでの認証情報使用       |
+| Workspace Cleanup   | ws-cleanup          | ワークスペースのクリーンアップ | `cleanWs()` メソッド使用           |
+| Timestamper         | timestamper         | ログにタイムスタンプ追加       | デバッグ用（オプション）           |
 
 **プラグインのインストール方法:**
 
