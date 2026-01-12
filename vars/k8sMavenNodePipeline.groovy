@@ -88,6 +88,10 @@ def call(Map cfg = [:]) {
                             sh """#!/bin/bash
                               set -euo pipefail
                               
+                              echo "=== Preflight: repo/.git and open handles ==="
+                              ls -la .git || true
+                              lsof | grep repo || true
+
                               echo "=== Maven Version ==="
                               mvn -v
                               
@@ -120,7 +124,7 @@ def call(Map cfg = [:]) {
             cleanup {
                 cleanWs(
                     deleteDirs: true,
-                    patterns: [[pattern: 'repo/**', type: 'INCLUDE']]
+                    disableDeferredWipeout: true
                 )
             }
         }

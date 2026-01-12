@@ -31,7 +31,7 @@ spec:
           memory: "${memLim}"
       env:
         - name: MAVEN_OPTS
-          value: "-Xmx\${memReq}"
+          value: "-Xmx1024m -Xms256m -XX:+UseContainerSupport"
   restartPolicy: Never
 """
 }
