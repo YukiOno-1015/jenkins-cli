@@ -352,6 +352,120 @@ k8sMavenNodePipeline(
 
 ## トラブルシューティング
 
+### SSH Host Key Verification エラー
+
+```
+No ED25519 host key is known for github.com and you have requested strict checking.
+Host key verification failed.
+```
+
+**原因**: Jenkins の known_hosts ファイルが存在しないか、GitHub のホストキーが登録されていません。
+
+**解決方法 1: Git Host Key Verification の設定変更（推奨）**
+
+1. **Manage Jenkins** → **Security** → **Git Host Key Verification Configuration**
+2. **Host Key Verification Strategy** を以下のいずれかに変更：
+   - **Accept first connection**: 初回接続時に自動的にホストキーを受け入れる（開発環境推奨）
+   - **Manually provided keys**: 手動でホストキーを提供する（本番環境推奨）
+3. **Save** をクリック
+
+**解決方法 2: known_hosts ファイルの手動作成**
+
+Jenkins サーバーまたはビルドエージェントで以下を実行：
+
+```bash
+# Jenkins ユーザーで実行
+mkdir -p ~/.ssh
+chmod 700 ~/.ssh
+ssh-keyscan -t ed25519,rsa github.com >> ~/.ssh/known_hosts
+chmod 644 ~/.ssh/known_hosts
+```
+
+Kubernetes Pod の場合、gitCloneSsh 関数が自動的に処理するため、この手順は不要です。
+
+**解決方法 3: gitCloneSsh の knownHost パラメータ確認**
+
+カスタムパイプラインで `gitCloneSsh` を使用している場合、`knownHost` パラメータが正しく設定されているか確認してください：
+
+```groovy
+gitCloneSsh(
+    repoUrl: 'git@github.com:your-org/your-repo.git',
+    knownHost: 'github.com',  // ← これが設定されているか確認
+    sshCredentialsId: 'github-ssh'
+)
+```
+
+### cleanWs の MissingContextVariableException エラー
+
+```
+MissingContextVariableException: Required context class hudson.FilePath is missing
+Perhaps you forgot to surround the step with a step that provides this, such as: node
+```
+
+**原因**: `cleanWs()` が `node` ブロックの外で実行されています。
+
+**解決方法**: [vars/k8sMavenNodePipeline.groovy](vars/k8sMavenNodePipeline.groovy) の `post` セクションを修正してください。
+
+**修正前（エラーが発生）:**
+
+```groovy
+pipeline {
+    agent none
+    options {
+        timestamps()
+    }
+    stages {
+        stage('Build') {
+            agent {
+                kubernetes { /* ... */ }
+            }
+            steps { /* ... */ }
+        }
+    }
+    post {
+        cleanup {
+            cleanWs()  // ← node ブロック外で実行されるためエラー
+        }
+    }
+}
+```
+
+**修正後（正常動作）:**
+
+```groovy
+pipeline {
+    agent none
+    options {
+        timestamps()
+    }
+    stages {
+        stage('Build') {
+            agent {
+                kubernetes { /* ... */ }
+            }
+            steps { /* ... */ }
+            post {
+                cleanup {
+                    cleanWs()  // ← agent ブロック内に移動
+                }
+            }
+        }
+    }
+}
+```
+
+または、`deleteDir()` を使用（プラグイン不要）：
+
+```groovy
+post {
+    cleanup {
+        script {
+            deleteDir()
+        }
+    }
+}
+```
+
 ### cleanWs メソッドが見つからないエラー
 
 ```
@@ -374,7 +488,7 @@ jenkins-cli install-plugin ws-cleanup
 
 **代替手段**: プラグインをインストールしたくない場合、[vars/k8sMavenNodePipeline.groovy](vars/k8sMavenNodePipeline.groovy)の`cleanup`セクションをコメントアウトするか、`deleteDir()`に置き換えてください。
 
-### SSH 接続エラー
+### SSH 接続エラー（一般）
 
 ```
 Host key verification failed
