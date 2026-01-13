@@ -5,7 +5,11 @@ set -euo pipefail
 CF_API_TOKEN="${CF_API_TOKEN:?set CF_API_TOKEN}"
 CF_ZONE_ID="${CF_ZONE_ID:?set CF_ZONE_ID}"
 HOSTNAME="jenkins-svc.sk4869.info"
-RULE_DESC="allowlist-jenkins-svc"   # Cloudflare上の custom rule description
+# Cloudflare上の複数の custom rule description（配列）
+RULE_DESCS=(
+  "allowlist-jenkins-svc"
+  "allowlist-sonar"
+)
 STATE_DIR="${STATE_DIR:-$HOME/.cf-allowlist}"
 STATE_FILE="$STATE_DIR/prev_ip.txt"
 IP_SOURCE_URL="${IP_SOURCE_URL:-https://ifconfig.me}"
@@ -51,36 +55,51 @@ if [[ -z "$ruleset_id" || "$ruleset_id" == "null" ]]; then
   exit 3
 fi
 
-# 2) 対象ルールを description で探す
-rule_json="$(echo "$entrypoint_json" | jq -c --arg d "$RULE_DESC" '.result.rules[] | select(.description==$d)')"
-if [[ -z "$rule_json" ]]; then
-  echo "ERROR: rule not found by description: $RULE_DESC" >&2
-  echo "Hint: set RULE_DESC to existing rule description" >&2
+# 2) 各ルールを更新
+updated_count=0
+for rule_desc in "${RULE_DESCS[@]}"; do
+  echo "Processing rule: $rule_desc"
+  
+  # 対象ルールを description で探す
+  rule_json="$(echo "$entrypoint_json" | jq -c --arg d "$rule_desc" '.result.rules[] | select(.description==$d)')"
+  if [[ -z "$rule_json" ]]; then
+    echo "  ⚠️  SKIP: rule not found by description: $rule_desc" >&2
+    continue
+  fi
+
+  rule_id="$(echo "$rule_json" | jq -r '.id')"
+
+  # 3) PATCHは「必要なフィールドを含めて更新」が原則なので、既存定義をベースに expression だけ差し替える
+  patched_rule="$(echo "$rule_json" | jq --arg e "$new_expr" '
+    {
+      description,
+      expression: $e,
+      action,
+      enabled,
+      action_parameters
+    }
+    # nullは送らない（Cloudflare側で不要フィールド扱い）
+    | with_entries(select(.value != null))
+  ')"
+
+  # 4) 更新
+  if curl -fsS \
+    -X PATCH \
+    -H "Authorization: Bearer $CF_API_TOKEN" \
+    -H "Content-Type: application/json" \
+    --data "$patched_rule" \
+    "h✅ Updated $updated_count rule(s)lare.com/client/v4/zones/$CF_ZONE_ID/rulesets/$ruleset_id/rules/$rule_id" >/dev/null; then
+    echo "  ✅ Updated: $rule_desc"
+    ((updated_count++))
+  else
+    echo "  ❌ FAILED: $rule_desc" >&2
+  fi
+done
+
+if [[ $updated_count -eq 0 ]]; then
+  echo "ERROR: no rules were updated" >&2
   exit 4
 fi
-
-rule_id="$(echo "$rule_json" | jq -r '.id')"
-
-# 3) PATCHは「必要なフィールドを含めて更新」が原則なので、既存定義をベースに expression だけ差し替える
-patched_rule="$(echo "$rule_json" | jq --arg e "$new_expr" '
-  {
-    description,
-    expression: $e,
-    action,
-    enabled,
-    action_parameters
-  }
-  # nullは送らない（Cloudflare側で不要フィールド扱い）
-  | with_entries(select(.value != null))
-')"
-
-# 4) 更新
-curl -fsS \
-  -X PATCH \
-  -H "Authorization: Bearer $CF_API_TOKEN" \
-  -H "Content-Type: application/json" \
-  --data "$patched_rule" \
-  "https://api.cloudflare.com/client/v4/zones/$CF_ZONE_ID/rulesets/$ruleset_id/rules/$rule_id" >/dev/null
 
 # 5) state更新（前回IPを保存）
 echo "$current_ip" > "$STATE_FILE"
