@@ -10,6 +10,20 @@ pipeline {
   }
 
   stages {
+    stage('Pull Latest Changes') {
+      steps {
+        sh '''
+          set -euo pipefail
+          
+          echo "Pulling latest changes from repository"
+          git pull origin main
+          
+          echo "Current commit:"
+          git log -1 --oneline
+        '''
+      }
+    }
+    
     stage('Update Cloudflare allowlist') {
       steps {
         withCredentials([
