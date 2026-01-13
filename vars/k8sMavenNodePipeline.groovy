@@ -14,6 +14,10 @@ def call(Map cfg = [:]) {
 
     def archivePattern = cfg.get('archivePattern', '**/target/*.jar')
 
+    def enableSonarQube = cfg.get('enableSonarQube', false)
+    def sonarQubeCredId = cfg.get('sonarQubeCredentialsId', 'SonarCube')
+    def sonarQubeUrl = cfg.get('sonarQubeUrl', 'https://sonar.sk4869.info')
+
     def cpuReq = cfg.get('cpuRequest', '500m')
     def memReq = cfg.get('memRequest', '2Gi')
     def cpuLim = cfg.get('cpuLimit', '2')
@@ -55,6 +59,11 @@ def call(Map cfg = [:]) {
                 name: 'MAVEN_PROFILE',
                 choices: mavenProfileChoices,
                 description: 'Maven profile to use for build'
+            )
+            booleanParam(
+                name: 'ENABLE_SONARQUBE',
+                defaultValue: enableSonarQube,
+                description: 'Run SonarQube analysis'
             )
         }
 
@@ -99,6 +108,38 @@ def call(Map cfg = [:]) {
                               ${mavenCommand} -P "\${MAVEN_PROFILE}"
                             """
                         }
+                    }
+                }
+            }
+
+            stage('SonarQube Analysis') {
+                when {
+                    expression { params.ENABLE_SONARQUBE == true }
+                }
+                steps {
+                    container('build') {
+                        dir('repo') {
+                            withSonarQubeEnv(credentialsId: sonarQubeCredId, installationName: 'SonarQube') {
+                                sh """#!/bin/bash
+                                  set -euo pipefail
+                                  
+                                  echo "=== Running SonarQube Analysis ==="
+                                  echo "SonarQube URL: ${sonarQubeUrl}"
+                                  
+                                  mvn -B sonar:sonar \
+                                    -Dsonar.host.url=${sonarQubeUrl} \
+                                    -P "\${MAVEN_PROFILE}"
+                                """
+                            }
+                        }
+                    }
+                }
+                post {
+                    success {
+                        echo "✅ SonarQube analysis completed - check results at ${sonarQubeUrl}"
+                    }
+                    failure {
+                        echo "⚠️ SonarQube analysis failed - build will continue"
                     }
                 }
             }

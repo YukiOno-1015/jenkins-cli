@@ -9,5 +9,6 @@ k8sMavenNodePipeline(
   gitSshCredentialsId: 'JQIT_ONO',
   mavenProfileChoices: ['dev', 'local', 'prod'],
   mavenDefaultProfile: 'dev',
-  archivePattern: '**/target/portalApp-Api_*.jar'
+  archivePattern: '**/target/portalApp-Api_*.jar',
+  enableSonarQube: true
 )

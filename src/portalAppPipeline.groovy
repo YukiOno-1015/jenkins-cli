@@ -1,5 +1,5 @@
-// Portal App Backend Build Pipeline
-// このファイルはPortal App Backendプロジェクト専用のパイプライン設定です
+// Portal App  Build Pipeline
+// このファイルはPortal Appプロジェクト専用のパイプライン設定です
 
 @Library('jqit-lib@main') _
 
@@ -9,5 +9,6 @@ k8sMavenNodePipeline(
   gitSshCredentialsId: 'JQIT_ONO',
   mavenProfileChoices: ['dev', 'prod'],
   mavenDefaultProfile: 'dev',
-  archivePattern: '**/target/portalApp-*.jar'
+  archivePattern: '**/target/portalApp-*.jar',
+  enableSonarQube: true
 )
