@@ -119,7 +119,7 @@ def call(Map cfg = [:]) {
                 steps {
                     container('build') {
                         dir('repo') {
-                            withSonarQubeEnv(credentialsId: sonarQubeCredId, installationName: 'SonarQube') {
+                            withCredentials([string(credentialsId: sonarQubeCredId, variable: 'SONAR_TOKEN')]) {
                                 sh """#!/bin/bash
                                   set -euo pipefail
                                   
@@ -128,6 +128,7 @@ def call(Map cfg = [:]) {
                                   
                                   mvn -B sonar:sonar \
                                     -Dsonar.host.url=${sonarQubeUrl} \
+                                    -Dsonar.token=\${SONAR_TOKEN} \
                                     -P "\${MAVEN_PROFILE}"
                                 """
                             }
