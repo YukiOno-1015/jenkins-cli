@@ -43,12 +43,9 @@ if [[ "$token_http_code" == "200" ]]; then
   token_status="$(echo "$token_verify_body" | jq -r '.result.status // "unknown"')"
   echo "  Token Status: $token_status"
   
-  # トークンの権限情報を表示
-  policies="$(echo "$token_verify_body" | jq -r '.result.policies[0] // empty')"
-  if [[ -n "$policies" ]]; then
-    echo "  Token Policies:"
-    echo "$policies" | jq '.'
-  fi
+  # トークンの全情報を表示（デバッグ用）
+  echo "  Full Token Details:"
+  echo "$token_verify_body" | jq '.result'
 else
   echo "⚠️  WARNING: Could not verify token (HTTP $token_http_code)" >&2
 fi
