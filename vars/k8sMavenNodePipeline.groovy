@@ -15,7 +15,7 @@ def call(Map cfg = [:]) {
     def archivePattern = cfg.get('archivePattern', '**/target/*.jar')
 
     def enableSonarQube = cfg.get('enableSonarQube', false)
-    def sonarQubeCredId = cfg.get('sonarQubeCredentialsId', 'SonarCube')
+    def sonarQubeCredId = cfg.get('sonarQubeCredentialsId', 'sonarQubeCredId')
     def sonarQubeUrl = cfg.get('sonarQubeUrl', 'https://sonar.sk4869.info')
     def sonarProjectName = cfg.get('sonarProjectName', '')
 
