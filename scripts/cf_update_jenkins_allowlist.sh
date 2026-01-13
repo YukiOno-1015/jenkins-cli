@@ -54,8 +54,18 @@ if [[ -z "$prev_ip" ]]; then
 fi
 
 # 1) entrypoint ruleset を取得（http_request_firewall_custom）
-echo "Fetching entrypoint ruleset from Cloudflare..."
+echo "=== Fetching entrypoint ruleset from Cloudflare ==="
 echo "  Zone ID: $CF_ZONE_ID"
+echo "  API Token length: ${#CF_API_TOKEN}"
+echo "  API Token prefix: ${CF_API_TOKEN:0:10}..."
+
+# トークン形式チェック
+if [[ ! "$CF_API_TOKEN" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+  echo "⚠️  WARNING: API Token has unexpected characters" >&2
+fi
+
+echo "  Request URL: https://api.cloudflare.com/client/v4/zones/$CF_ZONE_ID/rulesets/phases/http_request_firewall_custom/entrypoint"
+
 entrypoint_json="$(curl -s -w "\n%{http_code}" \
   -H "Authorization: Bearer $CF_API_TOKEN" \
   "https://api.cloudflare.com/client/v4/zones/$CF_ZONE_ID/rulesets/phases/http_request_firewall_custom/entrypoint")"
@@ -68,24 +78,22 @@ entrypoint_json="$(echo "$entrypoint_json" | sed '$d')"
 echo "  HTTP Status: $http_code"
 
 if [[ "$http_code" != "200" ]]; then
-  echo "ERROR: Cloudflare API returned HTTP $http_code" >&2
-  echo "Response: $entrypoint_json" >&2
+  echo "❌ ERROR: Cloudflare API returned HTTP $http_code" >&2
+  echo "Response body:" >&2
+  echo "$entrypoint_json" | jq '.' 2>/dev/null || echo "$entrypoint_json" >&2
+  
+  # 403 の場合は詳細情報
+  if [[ "$http_code" == "403" ]]; then
+    echo "" >&2
+    echo "🔐 Authentication Issue:" >&2
+    echo "  1. Check CF_API_TOKEN in Jenkins Credentials" >&2
+    echo "  2. Verify token has 'Zone.Firewall Services - Edit' permission" >&2
+    echo "  3. Token format should be: 'v1.xxxxxxxxxxxx...'" >&2
+  fi
   exit 3
 fi
 
-# エラーチェック
-if ! echo "$entrypoint_json" | jq empty 2>/dev/null; then
-  echo "ERROR: Invalid JSON response from Cloudflare API" >&2
-  echo "Response: $entrypoint_json" >&2
-  exit 3
-fi
-
-# API エラーチェック
-api_error="$(echo "$entrypoint_json" | jq -r '.errors[0].message // empty')"
-if [[ -n "$api_error" ]]; then
-  echo "ERROR: Cloudflare API error: $api_error" >&2
-  exit 3
-fi
+echo "✅ Successfully authenticated with Cloudflare"
 
 ruleset_id="$(echo "$entrypoint_json" | jq -r '.result.id')"
 if [[ -z "$ruleset_id" || "$ruleset_id" == "null" ]]; then
