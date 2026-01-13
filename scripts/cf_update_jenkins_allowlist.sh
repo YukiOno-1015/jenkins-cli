@@ -60,9 +60,10 @@ entrypoint_json="$(curl -s -w "\n%{http_code}" \
   -H "Authorization: Bearer $CF_API_TOKEN" \
   "https://api.cloudflare.com/client/v4/zones/$CF_ZONE_ID/rulesets/phases/http_request_firewall_custom/entrypoint")"
 
-# HTTP ステータスコードを抽出
-http_code="$(echo "$entrypoint_json" | tail -n1)"
-entrypoint_json="$(echo "$entrypoint_json" | head -n-1)"
+# HTTP ステータスコードを抽出（最後の行）
+http_code="$(echo "$entrypoint_json" | tail -1)"
+# レスポンスボディ（最後の行を除去）
+entrypoint_json="$(echo "$entrypoint_json" | sed '$d')"
 
 echo "  HTTP Status: $http_code"
 
@@ -136,9 +137,10 @@ for i in "${!RULE_DESCS[@]}"; do
     --data "$patched_rule" \
     "https://api.cloudflare.com/client/v4/zones/$CF_ZONE_ID/rulesets/$ruleset_id/rules/$rule_id")"
   
-  # HTTP ステータスコードを抽出
-  update_http_code="$(echo "$update_response" | tail -n1)"
-  update_body="$(echo "$update_response" | head -n-1)"
+  # HTTP ステータスコードを抽出（最後の行）
+  update_http_code="$(echo "$update_response" | tail -1)"
+  # レスポンスボディ（最後の行を除去）
+  update_body="$(echo "$update_response" | sed '$d')"
   
   # PATCH レスポンスチェック
   if [[ "$update_http_code" == "200" ]]; then
