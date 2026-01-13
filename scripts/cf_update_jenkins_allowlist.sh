@@ -4,16 +4,28 @@ set -euo pipefail
 # ====== 設定（ここだけ埋める）======
 CF_API_TOKEN="${CF_API_TOKEN:?set CF_API_TOKEN}"
 CF_ZONE_ID="${CF_ZONE_ID:?set CF_ZONE_ID}"
-HOSTNAME="jenkins-svc.sk4869.info"
+
 # Cloudflare上の複数の custom rule description（配列）
+# RULE_DESCS と HOSTNAMES は同じインデックスで対応
 RULE_DESCS=(
   "allowlist-jenkins-svc"
   "allowlist-sonar"
 )
+HOSTNAMES=(
+  "jenkins-svc.sk4869.info"
+  "sonar.sk4869.info"
+)
+
 STATE_DIR="${STATE_DIR:-$HOME/.cf-allowlist}"
 STATE_FILE="$STATE_DIR/prev_ip.txt"
 IP_SOURCE_URL="${IP_SOURCE_URL:-https://ifconfig.me}"
 # ===================================
+
+# 配列の長さチェック
+if [[ ${#RULE_DESCS[@]} -ne ${#HOSTNAMES[@]} ]]; then
+  echo "ERROR: RULE_DESCS and HOSTNAMES must have the same length" >&2
+  exit 1
+fi
 
 mkdir -p "$STATE_DIR"
 
@@ -41,9 +53,6 @@ if [[ -z "$prev_ip" ]]; then
   prev_ip="$current_ip"
 fi
 
-new_expr="(http.host eq \"$HOSTNAME\" and not ip.src in {$current_ip $prev_ip})"
-echo "New expression: $new_expr"
-
 # 1) entrypoint ruleset を取得（http_request_firewall_custom）
 entrypoint_json="$(curl -fsS \
   -H "Authorization: Bearer $CF_API_TOKEN" \
@@ -57,8 +66,14 @@ fi
 
 # 2) 各ルールを更新
 updated_count=0
-for rule_desc in "${RULE_DESCS[@]}"; do
-  echo "Processing rule: $rule_desc"
+for i in "${!RULE_DESCS[@]}"; do
+  rule_desc="${RULE_DESCS[$i]}"
+  hostname="${HOSTNAMES[$i]}"
+  
+  echo "Processing rule: $rule_desc (hostname: $hostname)"
+  
+  # 各ルール用の expression を生成
+  new_expr="(http.host eq \"$hostname\" and not ip.src in {$current_ip $prev_ip})"
   
   # 対象ルールを description で探す
   rule_json="$(echo "$entrypoint_json" | jq -c --arg d "$rule_desc" '.result.rules[] | select(.description==$d)')"
@@ -82,7 +97,7 @@ for rule_desc in "${RULE_DESCS[@]}"; do
     | with_entries(select(.value != null))
   ')"
 
-  # 4) 更新
+  # 4)ttps://api.cloudf
   if curl -fsS \
     -X PATCH \
     -H "Authorization: Bearer $CF_API_TOKEN" \
@@ -103,4 +118,4 @@ fi
 
 # 5) state更新（前回IPを保存）
 echo "$current_ip" > "$STATE_FILE"
-echo "Updated allowlist: current=$current_ip prev=$prev_ip"
+echo "✅ Updated $updated_count rule(s): current=$current_ip prev=$prev_ip"
