@@ -97,13 +97,13 @@ for i in "${!RULE_DESCS[@]}"; do
     | with_entries(select(.value != null))
   ')"
 
-  # 4)ttps://api.cloudf
+  # 4) 更新
   if curl -fsS \
     -X PATCH \
     -H "Authorization: Bearer $CF_API_TOKEN" \
     -H "Content-Type: application/json" \
     --data "$patched_rule" \
-    "h✅ Updated $updated_count rule(s)lare.com/client/v4/zones/$CF_ZONE_ID/rulesets/$ruleset_id/rules/$rule_id" >/dev/null; then
+    "https://api.cloudflare.com/client/v4/zones/$CF_ZONE_ID/rulesets/$ruleset_id/rules/$rule_id" >/dev/null; then
     echo "  ✅ Updated: $rule_desc"
     ((updated_count++))
   else
