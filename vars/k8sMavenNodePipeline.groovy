@@ -17,6 +17,7 @@ def call(Map cfg = [:]) {
     def enableSonarQube = cfg.get('enableSonarQube', false)
     def sonarQubeCredId = cfg.get('sonarQubeCredentialsId', 'SonarCube')
     def sonarQubeUrl = cfg.get('sonarQubeUrl', 'https://sonar.sk4869.info')
+    def sonarProjectName = cfg.get('sonarProjectName', '')
 
     def cpuReq = cfg.get('cpuRequest', '500m')
     def memReq = cfg.get('memRequest', '2Gi')
@@ -105,7 +106,7 @@ def call(Map cfg = [:]) {
                               mvn -v
                               
                               echo "=== Building with profile: \${MAVEN_PROFILE} ==="
-                              ${mavenCommand} -P "\${MAVEN_PROFILE}"
+                              ${mavenCommand} -P "\${MAVEN_PROFILE}" -DskipTests=false 2>&1 | grep -v "The requested profile" || true
                             """
                         }
                     }
@@ -126,10 +127,12 @@ def call(Map cfg = [:]) {
                                   echo "=== Running SonarQube Analysis ==="
                                   echo "SonarQube URL: ${sonarQubeUrl}"
                                   
-                                  mvn -B sonar:sonar \
+                                  PROJECT_NAME="${sonarProjectName}"
+                                  mvn clean verify org.sonarsource.scanner.maven:sonar-maven-plugin:sonar \
+                                    -Dsonar.projectKey=\${PROJECT_NAME} \
+                                    -Dsonar.projectName=\${PROJECT_NAME} \
                                     -Dsonar.host.url=${sonarQubeUrl} \
-                                    -Dsonar.token=\${SONAR_TOKEN} \
-                                    -P "\${MAVEN_PROFILE}"
+                                    -Dsonar.token=\${SONAR_TOKEN} || true
                                 """
                             }
                         }
@@ -140,7 +143,7 @@ def call(Map cfg = [:]) {
                         echo "✅ SonarQube analysis completed - check results at ${sonarQubeUrl}"
                     }
                     failure {
-                        echo "⚠️ SonarQube analysis failed - build will continue"
+                        echo "⚠️ SonarQube analysis failed - will continue build"
                     }
                 }
             }

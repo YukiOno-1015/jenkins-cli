@@ -10,5 +10,6 @@ k8sMavenNodePipeline(
   mavenProfileChoices: ['dev', 'prod'],
   mavenDefaultProfile: 'dev',
   archivePattern: '**/target/portalApp-*.jar',
-  enableSonarQube: true
+  enableSonarQube: true,
+  sonarProjectName: 'Portal_App'
 )
