@@ -55,9 +55,22 @@ fi
 
 # 1) entrypoint ruleset を取得（http_request_firewall_custom）
 echo "Fetching entrypoint ruleset from Cloudflare..."
-entrypoint_json="$(curl -fsS \
+echo "  Zone ID: $CF_ZONE_ID"
+entrypoint_json="$(curl -s -w "\n%{http_code}" \
   -H "Authorization: Bearer $CF_API_TOKEN" \
   "https://api.cloudflare.com/client/v4/zones/$CF_ZONE_ID/rulesets/phases/http_request_firewall_custom/entrypoint")"
+
+# HTTP ステータスコードを抽出
+http_code="$(echo "$entrypoint_json" | tail -n1)"
+entrypoint_json="$(echo "$entrypoint_json" | head -n-1)"
+
+echo "  HTTP Status: $http_code"
+
+if [[ "$http_code" != "200" ]]; then
+  echo "ERROR: Cloudflare API returned HTTP $http_code" >&2
+  echo "Response: $entrypoint_json" >&2
+  exit 3
+fi
 
 # エラーチェック
 if ! echo "$entrypoint_json" | jq empty 2>/dev/null; then
@@ -116,24 +129,27 @@ for i in "${!RULE_DESCS[@]}"; do
   ')"
 
   # 4) 更新
-  update_response="$(curl -fsS \
+  update_response="$(curl -s -w "\n%{http_code}" \
     -X PATCH \
     -H "Authorization: Bearer $CF_API_TOKEN" \
     -H "Content-Type: application/json" \
     --data "$patched_rule" \
-    "https://api.cloudflare.com/client/v4/zones/$CF_ZONE_ID/rulesets/$ruleset_id/rules/$rule_id" 2>&1 || true)"
+    "https://api.cloudflare.com/client/v4/zones/$CF_ZONE_ID/rulesets/$ruleset_id/rules/$rule_id")"
+  
+  # HTTP ステータスコードを抽出
+  update_http_code="$(echo "$update_response" | tail -n1)"
+  update_body="$(echo "$update_response" | head -n-1)"
   
   # PATCH レスポンスチェック
-  if echo "$update_response" | jq empty 2>/dev/null; then
-    update_error="$(echo "$update_response" | jq -r '.errors[0].message // empty')"
-    if [[ -n "$update_error" ]]; then
-      echo "  ❌ FAILED: $rule_desc - API error: $update_error" >&2
-    else
-      echo "  ✅ Updated: $rule_desc"
-      ((updated_count++))
-    fi
+  if [[ "$update_http_code" == "200" ]]; then
+    echo "  ✅ Updated: $rule_desc"
+    ((updated_count++))
   else
-    echo "  ❌ FAILED: $rule_desc - Invalid response: $update_response" >&2
+    update_error="$(echo "$update_body" | jq -r '.errors[0].message // empty' 2>/dev/null || echo "HTTP $update_http_code")"
+    echo "  ❌ FAILED: $rule_desc - $update_error" >&2
+    if [[ "$update_http_code" != "200" ]]; then
+      echo "    Response: $update_body" >&2
+    fi
   fi
 done
 
