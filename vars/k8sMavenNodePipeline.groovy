@@ -16,7 +16,7 @@ def call(Map cfg = [:]) {
 
     def enableSonarQube = cfg.get('enableSonarQube', false)
     def sonarQubeCredId = cfg.get('sonarQubeCredentialsId', 'sonarQubeCredId')
-    def sonarQubeUrl = cfg.get('sonarQubeUrl', 'https://sonar.sk4869.info')
+    def sonarQubeUrl = cfg.get('sonarQubeUrl', 'https://sonar-csv.sk4869.info')
     def sonarProjectName = cfg.get('sonarProjectName', '')
 
     def cpuReq = cfg.get('cpuRequest', '500m')
