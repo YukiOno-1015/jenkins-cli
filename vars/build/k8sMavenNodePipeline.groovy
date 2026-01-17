@@ -91,7 +91,7 @@ def call(Map cfg = [:]) {
                                 repoUrl: params.GIT_REPO_URL,
                                 branch: params.GIT_BRANCH,
                                 dir: 'repo',
-                                sshCredentialsId: params.GIT_SSH_CREDENTIALS_ID,
+                                sshCredentialsId: gitSshCredId,
                                 knownHost: 'github.com'
                             )
                         }
