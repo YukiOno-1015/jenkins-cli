@@ -1,28 +1,36 @@
 def call(Map cfg = [:]) {
-    // ---- default config ----
+    // ---- gitRepoUrlは必須 ----
+    def gitRepoUrl = cfg.gitRepoUrl ?: error('gitRepoUrl is required')
+    
+    // ---- repositoryConfigから設定を取得 ----
+    def repoConfig = repositoryConfig(gitRepoUrl)
+    echo "Using repository configuration for: ${repoConfig.repoName}"
+    
+    // ---- 設定の優先順位: 引数 > repositoryConfig > デフォルト値 ----
     def namespace = cfg.get('namespace', 'jenkins')
-    def image = cfg.get('image', 'honoka4869/jenkins-maven-node:latest')
     def imagePullSecret = cfg.get('imagePullSecret', 'dockerhub-jenkins-agent')
 
-    def gitRepoUrl = cfg.gitRepoUrl ?: error('gitRepoUrl is required')
     def gitBranch = cfg.get('gitBranch', 'main')
-    def gitSshCredId = cfg.get('gitSshCredentialsId', 'github-ssh')
+    def gitSshCredId = cfg.get('gitSshCredentialsId', repoConfig.credentialsId)
 
-    def mavenProfileChoices = cfg.get('mavenProfileChoices', ['dev', 'local', 'prod'])
-    def mavenDefaultProfile = cfg.get('mavenDefaultProfile', 'dev')
+    def mavenProfileChoices = cfg.get('mavenProfileChoices', repoConfig.buildProfiles)
+    def mavenDefaultProfile = cfg.get('mavenDefaultProfile', repoConfig.defaultProfile)
     def mavenCommand = cfg.get('mavenCommand', 'mvn -B clean package')
 
-    def archivePattern = cfg.get('archivePattern', '**/target/*.jar')
+    def archivePattern = cfg.get('archivePattern', repoConfig.archivePattern)
+    def skipArchive = cfg.get('skipArchive', repoConfig.skipArchive)
 
-    def enableSonarQube = cfg.get('enableSonarQube', false)
+    def enableSonarQube = cfg.get('enableSonarQube', repoConfig.sonarEnabled)
     def sonarQubeCredId = cfg.get('sonarQubeCredentialsId', 'sonarQubeCredId')
     def sonarQubeUrl = cfg.get('sonarQubeUrl', 'https://sonar-svc.sk4869.info')
-    def sonarProjectName = cfg.get('sonarProjectName', '')
+    def sonarProjectName = cfg.get('sonarProjectName', repoConfig.sonarProjectName)
 
-    def cpuReq = cfg.get('cpuRequest', '500m')
-    def memReq = cfg.get('memRequest', '2Gi')
-    def cpuLim = cfg.get('cpuLimit', '2')
-    def memLim = cfg.get('memLimit', '4Gi')
+    // K8s設定もrepositoryConfigから
+    def image = cfg.get('image', repoConfig.k8s.image)
+    def cpuReq = cfg.get('cpuRequest', repoConfig.k8s.cpuRequest)
+    def memReq = cfg.get('memRequest', repoConfig.k8s.memRequest)
+    def cpuLim = cfg.get('cpuLimit', repoConfig.k8s.cpuLimit)
+    def memLim = cfg.get('memLimit', repoConfig.k8s.memLimit)
 
     pipeline {
         agent {
@@ -149,11 +157,14 @@ def call(Map cfg = [:]) {
             }
 
             stage('Archive Artifacts') {
+                when {
+                    expression { skipArchive == false && archivePattern }
+                }
                 steps {
                     archiveArtifacts(
                         artifacts: archivePattern,
                         fingerprint: true,
-                        allowEmptyArchive: false
+                        allowEmptyArchive: true
                     )
                 }
             }

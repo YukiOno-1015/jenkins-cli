@@ -3,15 +3,23 @@ def call(Map args = [:]) {
     if (!args.repoUrl) {
         error('repoUrl is required')
     }
-    if (!args.sshCredentialsId) {
-        error('sshCredentialsId is required')
-    }
     
     def repoUrl = args.repoUrl
     def branch  = args.get('branch', 'main')
     def dirName = args.get('dir', 'repo')
-    def sshCred = args.sshCredentialsId
     def knownHost = args.get('knownHost', 'github.com')
+    
+    // sshCredentialsIdが指定されていなければrepositoryConfigから取得
+    def sshCred = args.sshCredentialsId
+    if (!sshCred) {
+        def config = repositoryConfig(repoUrl)
+        sshCred = config.credentialsId
+        echo "Using credentials from repositoryConfig: ${sshCred}"
+    }
+    
+    if (!sshCred) {
+        error('sshCredentialsId could not be determined')
+    }
 
     sshagent(credentials: [sshCred]) {
         sh """#!/bin/bash

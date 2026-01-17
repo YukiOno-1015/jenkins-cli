@@ -1,10 +1,18 @@
 def call(Map args = [:]) {
-    def image = args.get('image', 'honoka4869/jenkins-maven-node:latest')
+    // repositoryConfigから設定を取得（オプション）
+    def config = null
+    if (args.repoName || args.repoUrl) {
+        def identifier = args.repoName ?: args.repoUrl
+        config = repositoryConfig(identifier)
+    }
+    
+    // 引数 > repositoryConfig > デフォルト値 の優先順位
+    def image = args.get('image', config?.k8s?.image ?: 'honoka4869/jenkins-maven-node:latest')
     def imagePullSecret = args.get('imagePullSecret', 'dockerhub-jenkins-agent')
-    def cpuReq = args.get('cpuRequest', '500m')
-    def memReq = args.get('memRequest', '2Gi')
-    def cpuLim = args.get('cpuLimit', '2')
-    def memLim = args.get('memLimit', '4Gi')
+    def cpuReq = args.get('cpuRequest', config?.k8s?.cpuRequest ?: '500m')
+    def memReq = args.get('memRequest', config?.k8s?.memRequest ?: '2Gi')
+    def cpuLim = args.get('cpuLimit', config?.k8s?.cpuLimit ?: '2')
+    def memLim = args.get('memLimit', config?.k8s?.memLimit ?: '4Gi')
 
     // YAML生成をより保守性の高い形式で
     return """---
