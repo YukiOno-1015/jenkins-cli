@@ -47,35 +47,6 @@ def call(Map cfg = [:]) {
             }
         }
 
-        parameters {
-            string(
-                name: 'GIT_REPO_URL',
-                defaultValue: gitRepoUrl,
-                description: 'GitHub SSH repo URL'
-            )
-            string(
-                name: 'GIT_BRANCH',
-                defaultValue: gitBranch,
-                description: 'Git branch to checkout'
-            )
-            credentials(
-                name: 'GIT_SSH_CREDENTIALS_ID',
-                defaultValue: gitSshCredId,
-                description: 'SSH credentials ID for GitHub',
-                required: true
-            )
-            choice(
-                name: 'MAVEN_PROFILE',
-                choices: mavenProfileChoices,
-                description: 'Maven profile to use for build'
-            )
-            booleanParam(
-                name: 'ENABLE_SONARQUBE',
-                defaultValue: enableSonarQube,
-                description: 'Run SonarQube analysis'
-            )
-        }
-
         options {
             buildDiscarder(logRotator(numToKeepStr: '30', artifactNumToKeepStr: '10'))
             timeout(time: 30, unit: 'MINUTES')
@@ -88,8 +59,8 @@ def call(Map cfg = [:]) {
                     container('build') {
                         script {
                             gitCloneSsh(
-                                repoUrl: params.GIT_REPO_URL,
-                                branch: params.GIT_BRANCH,
+                                repoUrl: gitRepoUrl,
+                                branch: gitBranch,
                                 dir: 'repo',
                                 sshCredentialsId: gitSshCredId,
                                 knownHost: 'github.com'
@@ -113,8 +84,8 @@ def call(Map cfg = [:]) {
                               echo "=== Maven Version ==="
                               mvn -v
                               
-                              echo "=== Building with profile: \${MAVEN_PROFILE} ==="
-                              ${mavenCommand} -P "\${MAVEN_PROFILE}" -DskipTests=false 2>&1 | grep -v "The requested profile" || true
+                              echo "=== Building with profile: ${mavenDefaultProfile} ==="
+                              ${mavenCommand} -P "${mavenDefaultProfile}" -DskipTests=false 2>&1 | grep -v "The requested profile" || true
                             """
                         }
                     }
@@ -123,7 +94,7 @@ def call(Map cfg = [:]) {
 
             stage('SonarQube Analysis') {
                 when {
-                    expression { params.ENABLE_SONARQUBE == true }
+                    expression { enableSonarQube == true }
                 }
                 steps {
                     container('build') {
@@ -172,7 +143,7 @@ def call(Map cfg = [:]) {
 
         post {
             success {
-                echo "✅ Build SUCCESS (profile: \${params.MAVEN_PROFILE})"
+                echo "✅ Build SUCCESS (profile: ${mavenDefaultProfile})"
             }
             failure {
                 echo "❌ Build FAILED - check console logs for details"
