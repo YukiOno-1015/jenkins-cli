@@ -2,7 +2,15 @@
 // このファイルはPortal Appプロジェクト専用のパイプライン設定です
 // 設定はvars/repositoryConfig.groovyで一元管理されています
 
-@Library('jqit-lib@main') _
+def libBranch = env.CHANGE_BRANCH ?: env.BRANCH_NAME ?: 'main'
+def libId = "jqit-lib@${libBranch}"
+
+try {
+  library libId
+} catch (err) {
+  echo "Failed to load ${libId}, falling back to jqit-lib@main"
+  library 'jqit-lib@main'
+}
 
 // repositoryConfigから全ての設定を自動取得
 // 必要に応じてブランチなどを上書き可能
