@@ -10,10 +10,12 @@ CF_ZONE_ID="${CF_ZONE_ID:?set CF_ZONE_ID}"
 RULE_DESCS=(
   "allowlist-jenkins-svc"
   "allowlist-sonar"
+  "allowlist-pv"
 )
 HOSTNAMES=(
   "jenkins-svc.sk4869.info"
-  "sonar.sk4869.info"
+  "sonar-svc.sk4869.info"
+  "pv-svc.sk4869.info"
 )
 
 STATE_DIR="${STATE_DIR:-$HOME/.cf-allowlist}"
