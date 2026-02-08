@@ -111,7 +111,7 @@ def call(Map cfg = [:]) {
                                   echo "SonarQube URL: ${sonarQubeUrl}"
                                   
                                   PROJECT_NAME="${sonarProjectName}"
-                                  mvn clean verify org.sonarsource.scanner.maven:sonar-maven-plugin:sonar \
+                                  mvn clean verify -P "${mavenDefaultProfile}" -DskipTests=false \
                                     -Dsonar.projectKey=\${PROJECT_NAME} \
                                     -Dsonar.projectName=\${PROJECT_NAME} \
                                     -Dsonar.host.url=${sonarQubeUrl} \
