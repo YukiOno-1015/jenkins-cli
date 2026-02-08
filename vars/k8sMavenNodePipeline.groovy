@@ -21,7 +21,7 @@ def call(Map cfg = [:]) {
     def skipArchive = cfg.get('skipArchive', repoConfig.skipArchive)
 
     def enableSonarQube = cfg.get('enableSonarQube', repoConfig.sonarEnabled)
-    def sonarQubeCredId = cfg.get('sonarQubeCredentialsId', 'sonarQubeCredId')
+    def sonarQubeCredId = cfg.get('sonarQubeCredentialsId', 'sonarqube-token')
     def sonarQubeUrl = cfg.get('sonarQubeUrl', 'hhttp://sonarqube-sonarqube.sonarqube.svc.cluster.local:9000')
     def sonarProjectName = cfg.get('sonarProjectName', repoConfig.sonarProjectName)
 
