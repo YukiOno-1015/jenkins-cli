@@ -22,7 +22,12 @@ def call(Map cfg = [:]) {
 
     def enableSonarQube = cfg.get('enableSonarQube', repoConfig.sonarEnabled)
     def sonarQubeCredId = cfg.get('sonarQubeCredentialsId', 'sonarqube-token')
-    def sonarQubeUrl = cfg.get('sonarQubeUrl', 'hhttp://sonarqube-sonarqube.sonarqube.svc.cluster.local:9000')
+    def sonarQubeUrl = cfg.get('sonarQubeUrl', 'http://sonarqube-sonarqube.sonarqube.svc.cluster.local:9000')
+
+    def sonarQubeUrl = sonarQubeUrlRaw?.replaceFirst('^hhttp', 'http')
+    if (sonarQubeUrl && !sonarQubeUrl.startsWith('http://') && !sonarQubeUrl.startsWith('https://')) {
+        echo "⚠️  WARNING: sonarQubeUrl has invalid scheme: ${sonarQubeUrl}"
+    }
     def sonarProjectName = cfg.get('sonarProjectName', repoConfig.sonarProjectName)
 
     // K8s設定もrepositoryConfigから
