@@ -19,7 +19,7 @@ def call(String repoNameOrUrl) {
   def configs = [
     'Portal_App': [
       // 認証情報
-      credentialsId: 'JQIT_ONO',
+      credentialsId: 'jqit-github-sshkey',
       
       // ビルド設定
       buildProfiles: ['dev', 'prod'],
@@ -47,7 +47,7 @@ def call(String repoNameOrUrl) {
     
     'Portal_App_Backend': [
       // 認証情報
-      credentialsId: 'JQIT_ONO',
+      credentialsId: 'jqit-github-sshkey',
       
       // ビルド設定
       buildProfiles: ['dev', 'local', 'prod'],
@@ -78,7 +78,7 @@ def call(String repoNameOrUrl) {
     // ============================================================
     'PythonSampleProject': [
       // 認証情報
-      credentialsId: 'JQIT_ONO',
+      credentialsId: 'jqit-github-sshkey',
       
       // ビルド設定
       buildProfiles: ['dev', 'prod'],
@@ -135,7 +135,7 @@ def call(String repoNameOrUrl) {
     
     // デフォルト設定
     config = [
-      credentialsId: 'JQIT_ONO',
+      credentialsId: 'jqit-github-sshkey',
       buildProfiles: ['dev', 'prod'],
       defaultProfile: 'dev',
       archivePattern: '**/target/*.jar',
