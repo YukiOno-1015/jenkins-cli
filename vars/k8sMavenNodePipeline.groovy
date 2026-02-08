@@ -22,7 +22,7 @@ def call(Map cfg = [:]) {
 
     def enableSonarQube = cfg.get('enableSonarQube', repoConfig.sonarEnabled)
     def sonarQubeCredId = cfg.get('sonarQubeCredentialsId', 'sonarQubeCredId')
-    def sonarQubeUrl = cfg.get('sonarQubeUrl', 'https://sonar-svc.sk4869.info')
+    def sonarQubeUrl = cfg.get('sonarQubeUrl', 'hhttp://sonarqube-sonarqube.sonarqube.svc.cluster.local:9000')
     def sonarProjectName = cfg.get('sonarProjectName', repoConfig.sonarProjectName)
 
     // K8s設定もrepositoryConfigから
