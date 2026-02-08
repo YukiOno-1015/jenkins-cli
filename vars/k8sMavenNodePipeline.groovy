@@ -75,6 +75,9 @@ def call(Map cfg = [:]) {
             }
 
             stage('Maven Build') {
+                when {
+                    expression { enableSonarQube == false }
+                }
                 steps {
                     container('build') {
                         dir('repo') {
@@ -89,7 +92,6 @@ def call(Map cfg = [:]) {
                               mvn -v
                               
                               echo "=== Building with profile: ${mavenDefaultProfile} ==="
-                              echo "${mavenCommand} -P "${mavenDefaultProfile}" -DskipTests=false"
 
                               ${mavenCommand} -P "${mavenDefaultProfile}" -DskipTests=false 2>&1 | grep -v "The requested profile" || true
                             """
@@ -98,7 +100,7 @@ def call(Map cfg = [:]) {
                 }
             }
 
-            stage('SonarQube Analysis') {
+            stage('Maven Build(SonarQube Analysis)') {
                 when {
                     expression { enableSonarQube == true }
                 }
@@ -108,9 +110,13 @@ def call(Map cfg = [:]) {
                             withCredentials([string(credentialsId: sonarQubeCredId, variable: 'SONAR_TOKEN')]) {
                                 sh """#!/bin/bash
                                   set -euo pipefail
-                                  
-                                  echo "=== Running SonarQube Analysis ==="
+                                  echo "=== Maven Version ==="
+                                  mvn -v
+
+                                  echo "=== Running SonarQube Analysis Building with profile: ${mavenDefaultProfile} ==="
                                   echo "SonarQube URL: ${sonarQubeUrl}"
+                                  
+                                  echo "=== Building with profile: ${mavenDefaultProfile} ==="
                                   
                                   PROJECT_NAME="${sonarProjectName}"
                                   mvn clean verify -P "${mavenDefaultProfile}" -DskipTests=false \

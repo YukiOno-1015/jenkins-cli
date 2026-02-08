@@ -75,6 +75,9 @@ def call(Map cfg = [:]) {
             }
 
             stage('Maven Build') {
+                when {
+                    expression { enableSonarQube == false }
+                }
                 steps {
                     container('build') {
                         dir('repo') {
@@ -96,7 +99,7 @@ def call(Map cfg = [:]) {
                 }
             }
 
-            stage('SonarQube Analysis') {
+            stage('Maven Build(SonarQube Analysis)') {
                 when {
                     expression { enableSonarQube == true }
                 }
@@ -107,9 +110,13 @@ def call(Map cfg = [:]) {
                                 sh """#!/bin/bash
                                   set -euo pipefail
                                   
+                                  echo "=== Maven Version ==="
+                                  mvn -v
+
                                   echo "=== Running SonarQube Analysis ==="
                                   echo "SonarQube URL: ${sonarQubeUrl}"
                                   
+                                  echo "=== Building with profile: ${mavenDefaultProfile} ==="
                                   PROJECT_NAME="${sonarProjectName}"
                                   mvn clean verify -P "${mavenDefaultProfile}" -DskipTests=false \
                                     -Dsonar.projectKey=\${PROJECT_NAME} \
