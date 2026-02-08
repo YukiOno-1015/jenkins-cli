@@ -46,6 +46,9 @@ def call(Map args = [:]) {
           cd '${dirName}'
           echo "Repository cloned successfully"
           ls -la
+
+          git checkout '${branch}'
+          git branch --contains | cut -d " " -f 2
         """
     }
 }
