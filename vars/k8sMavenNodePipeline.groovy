@@ -90,6 +90,8 @@ def call(Map cfg = [:]) {
                               mvn -v
                               
                               echo "=== Building with profile: ${mavenDefaultProfile} ==="
+                              echo "${mavenCommand} -P "${mavenDefaultProfile}" -DskipTests=false"
+                              
                               ${mavenCommand} -P "${mavenDefaultProfile}" -DskipTests=false 2>&1 | grep -v "The requested profile" || true
                             """
                         }
