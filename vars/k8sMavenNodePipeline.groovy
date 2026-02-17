@@ -1,13 +1,14 @@
 def call(Map cfg = [:]) {
     // ---- gitRepoUrlは必須 ----
     def gitRepoUrl = cfg.gitRepoUrl ?: error('gitRepoUrl is required')
-    
+
     // ---- repositoryConfigから設定を取得 ----
     def repoConfig = repositoryConfig(gitRepoUrl)
     echo "Using repository configuration for: ${repoConfig.repoName}"
-    
+
     // ---- 設定の優先順位: 引数 > repositoryConfig > デフォルト値 ----
     def namespace = cfg.get('namespace', 'jenkins')
+    // NOTE: これは "Kubernetes Secret 名" (spec.imagePullSecrets[].name)
     def imagePullSecret = cfg.get('imagePullSecret', 'docker-hub')
 
     def gitBranch = cfg.get('gitBranch', 'main')
@@ -39,6 +40,7 @@ def call(Map cfg = [:]) {
     pipeline {
         agent {
             kubernetes {
+                namespace namespace
                 defaultContainer 'build'
                 yaml k8sPodYaml(
                     image: image,
@@ -52,6 +54,9 @@ def call(Map cfg = [:]) {
         }
 
         options {
+            // Declarative の自動 Checkout SCM を無効化（Git plugin の known_hosts 問題を回避）
+            skipDefaultCheckout(true)
+
             buildDiscarder(logRotator(numToKeepStr: '30', artifactNumToKeepStr: '10'))
             timeout(time: 30, unit: 'MINUTES')
             timestamps()
@@ -83,14 +88,14 @@ def call(Map cfg = [:]) {
                         dir('repo') {
                             sh """#!/bin/bash
                               set -euo pipefail
-                              
+
                               echo "=== Preflight: repo/.git and open handles ==="
                               ls -la .git || true
                               lsof | grep repo || true
 
                               echo "=== Maven Version ==="
                               mvn -v
-                              
+
                               echo "=== Building with profile: ${mavenDefaultProfile} ==="
 
                               ${mavenCommand} -P "${mavenDefaultProfile}" -DskipTests=false 2>&1 | grep -v "The requested profile" || true
@@ -115,9 +120,9 @@ def call(Map cfg = [:]) {
 
                                   echo "=== Running SonarQube Analysis Building with profile: ${mavenDefaultProfile} ==="
                                   echo "SonarQube URL: ${sonarQubeUrl}"
-                                  
+
                                   echo "=== Building with profile: ${mavenDefaultProfile} ==="
-                                  
+
                                   PROJECT_NAME="${sonarProjectName}"
                                   mvn clean verify -P "${mavenDefaultProfile}" -DskipTests=false \
                                   org.sonarsource.scanner.maven:sonar-maven-plugin:sonar \
@@ -162,22 +167,28 @@ def call(Map cfg = [:]) {
                 echo "❌ Build FAILED - check console logs for details"
             }
             cleanup {
-                container('build') {
-                    // soften permissions/ownership so workspace cleanup can proceed
-                    sh '''#!/bin/bash
-                      set -euo pipefail
-                      chown -R "$(id -u)":"$(id -g)" . || true
-                      chmod -R u+rwX . || true
-                    '''
-                    script {
+                script {
+                    // Pod 起動失敗/Checkout前失敗などで agent(workspace) が無い場合はスキップ
+                    if (!env.NODE_NAME || !env.WORKSPACE) {
+                        echo "🧹 Skip cleanup: agent/workspace not available (NODE_NAME=${env.NODE_NAME}, WORKSPACE=${env.WORKSPACE})"
+                        return
+                    }
+
+                    container('build') {
+                        // soften permissions/ownership so workspace cleanup can proceed
+                        sh '''#!/bin/bash
+                          set -euo pipefail
+                          chown -R "$(id -u)":"$(id -g)" . || true
+                          chmod -R u+rwX . || true
+                        '''
                         try {
                             deleteDir()
                         } catch (err) {
                             echo "deleteDir() failed (${err}); fallback to rm -rf"
-                            sh """#!/bin/bash
+                            sh '''#!/bin/bash
                               set -euo pipefail
                               rm -rf -- ./* ./.??* || true
-                            """
+                            '''
                         }
                     }
                 }
