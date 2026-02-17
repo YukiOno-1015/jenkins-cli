@@ -11,7 +11,7 @@ def call(Map cfg = [:]) {
     // NOTE: これは "Kubernetes Secret 名" (spec.imagePullSecrets[].name)
     def imagePullSecret = cfg.get('imagePullSecret', 'docker-hub')
 
-    def gitBranch = cfg.get('gitBranch', 'main')
+    def gitBranch = cfg.get('gitBranch', 'release1.0.0')
     def gitSshCredId = cfg.get('gitSshCredentialsId', repoConfig.credentialsId)
 
     def mavenProfileChoices = cfg.get('mavenProfileChoices', repoConfig.buildProfiles)
@@ -56,8 +56,8 @@ def call(Map cfg = [:]) {
         parameters {
             string(
                 name: 'gitBranch',
-                defaultValue: 'main',
-                description: 'Git branch to build (default: main)'
+                defaultValue: 'release1.0.0',
+                description: 'Git branch to build (default: release1.0.0)'
             )
             choice(
                 name: 'mavenProfile',
