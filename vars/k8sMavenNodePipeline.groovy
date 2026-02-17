@@ -53,6 +53,29 @@ def call(Map cfg = [:]) {
             }
         }
 
+        parameters {
+            string(
+                name: 'gitBranch',
+                defaultValue: 'main',
+                description: 'Git branch to build (default: main)'
+            )
+            choice(
+                name: 'mavenProfile',
+                choices: mavenProfileChoices,
+                description: 'Maven build profile to use'
+            )
+            booleanParam(
+                name: 'skipTests',
+                defaultValue: false,
+                description: 'Skip unit tests (default: false)'
+            )
+            booleanParam(
+                name: 'enableSonarQube',
+                defaultValue: enableSonarQube,
+                description: "Run SonarQube analysis (default: ${enableSonarQube})"
+            )
+        }
+
         options {
             // Declarative の自動 Checkout SCM を無効化（Git plugin の known_hosts 問題を回避）
             skipDefaultCheckout(true)
@@ -67,9 +90,11 @@ def call(Map cfg = [:]) {
                 steps {
                     container('build') {
                         script {
+                            // パラメータ入力があれば、それを優先
+                            def branch = params.gitBranch ?: gitBranch
                             gitCloneSsh(
                                 repoUrl: gitRepoUrl,
-                                branch: gitBranch,
+                                branch: branch,
                                 dir: 'repo',
                                 sshCredentialsId: gitSshCredId,
                                 knownHost: 'github.com'
