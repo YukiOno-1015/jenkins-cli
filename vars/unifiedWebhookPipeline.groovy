@@ -14,6 +14,7 @@
 def call(Map config = [:]) {
   // デフォルト設定
   def defaults = [
+    namespace: 'jenkins',
     k8sImage: 'honoka4869/jenkins-maven-node:latest',
     k8sImagePullSecret: 'dockerhub-jenkins-agent',
     k8sCpuRequest: '500m',
@@ -30,6 +31,8 @@ def call(Map config = [:]) {
   pipeline {
     agent {
       kubernetes {
+        namespace cfg.namespace
+        defaultContainer 'build'
         yaml k8sPodYaml(
           image: cfg.k8sImage,
           imagePullSecret: cfg.k8sImagePullSecret,
@@ -38,7 +41,6 @@ def call(Map config = [:]) {
           cpuLimit: cfg.k8sCpuLimit,
           memLimit: cfg.k8sMemLimit
         )
-        defaultContainer 'build'
       }
     }
     
