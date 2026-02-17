@@ -7,7 +7,7 @@ def call(Map cfg = [:]) {
     echo "Using repository configuration for: ${repoConfig.repoName}"
 
     // ---- 設定の優先順位: 引数 > repositoryConfig > デフォルト値 ----
-    def namespace = cfg.get('namespace', 'jenkins')
+    def k8sNamespace = cfg.get('namespace', 'jenkins')
     // NOTE: これは "Kubernetes Secret 名" (spec.imagePullSecrets[].name)
     def imagePullSecret = cfg.get('imagePullSecret', 'docker-hub')
 
@@ -40,7 +40,7 @@ def call(Map cfg = [:]) {
     pipeline {
         agent {
             kubernetes {
-                namespace namespace
+                namespace k8sNamespace
                 defaultContainer 'build'
                 yaml k8sPodYaml(
                     image: image,
