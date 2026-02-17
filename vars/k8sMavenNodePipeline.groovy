@@ -8,7 +8,7 @@ def call(Map cfg = [:]) {
     
     // ---- 設定の優先順位: 引数 > repositoryConfig > デフォルト値 ----
     def namespace = cfg.get('namespace', 'jenkins')
-    def imagePullSecret = cfg.get('imagePullSecret', 'docker-hub-cred')
+    def imagePullSecret = cfg.get('imagePullSecret', 'docker-hub')
 
     def gitBranch = cfg.get('gitBranch', 'main')
     def gitSshCredId = cfg.get('gitSshCredentialsId', repoConfig.credentialsId)
