@@ -12,37 +12,28 @@ try {
   library 'jqit-lib@main'
 }
 
-pipeline {
-  agent any
-  
-  parameters {
+// パラメータ定義（スクリプトパイプライン用）
+properties([
+  parameters([
     string(
       name: 'gitBranch',
       defaultValue: 'release1.0.0',
       description: 'Git branch to build (default: release1.0.0)'
     )
-  }
-  
-  stages {
-    stage('Build') {
-      steps {
-        script {
-          // repositoryConfigから全ての設定を自動取得
-          // 必要に応じてブランチなどを上書き可能
-          k8sMavenNodePipeline(
-            gitRepoUrl: 'git@github.com:jqit-dev/Portal_App.git',
-            gitBranch: params.gitBranch ?: 'release1.0.0'
-            // 以下の設定はrepositoryConfig.groovyから自動取得されます:
-            // - gitSshCredentialsId
-            // - mavenProfileChoices
-            // - mavenDefaultProfile
-            // - archivePattern
-            // - enableSonarQube
-            // - sonarProjectName
-            // - k8s リソース設定
-          )
-        }
-      }
-    }
-  }
-}
+  ])
+])
+
+// repositoryConfigから全ての設定を自動取得
+// 必要に応じてブランチなどを上書き可能
+k8sMavenNodePipeline(
+  gitRepoUrl: 'git@github.com:jqit-dev/Portal_App.git',
+  gitBranch: params.gitBranch ?: 'release1.0.0'
+  // 以下の設定はrepositoryConfig.groovyから自動取得されます:
+  // - gitSshCredentialsId
+  // - mavenProfileChoices
+  // - mavenDefaultProfile
+  // - archivePattern
+  // - enableSonarQube
+  // - sonarProjectName
+  // - k8s リソース設定
+)
