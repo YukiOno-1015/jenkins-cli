@@ -35,8 +35,8 @@ def call(Map args = [:]) {
           mkdir -p ~/.ssh
           chmod 700 ~/.ssh
           if ! grep -q "${knownHost}" ~/.ssh/known_hosts 2>/dev/null; then
-            echo "Adding ${knownHost} to known_hosts"
-            ssh-keyscan -H ${knownHost} >> ~/.ssh/known_hosts
+            echo "Adding ${knownHost} to known_hosts (including ED25519)"
+            ssh-keyscan -t rsa,ecdsa,ed25519 -H ${knownHost} >> ~/.ssh/known_hosts
           fi
           
           # Gitクローン
