@@ -29,6 +29,7 @@ def call(Map cfg = [:]) {
         echo "⚠️  WARNING: sonarQubeUrl has invalid scheme: ${sonarQubeUrl}"
     }
     def sonarProjectName = cfg.get('sonarProjectName', repoConfig.sonarProjectName)
+    def sonarBranchSuffix = sanitizeForSonarProjectKey(gitBranch)
 
     // K8s設定もrepositoryConfigから
     def image = cfg.get('image', repoConfig.k8s.image)
@@ -151,8 +152,8 @@ def call(Map cfg = [:]) {
                                   PROJECT_NAME="${sonarProjectName}"
                                   mvn clean verify -P "${mavenDefaultProfile}" -DskipTests=false \
                                   org.sonarsource.scanner.maven:sonar-maven-plugin:sonar \
-                                    -Dsonar.projectKey=\${PROJECT_NAME}_${gitBranch} \
-                                    -Dsonar.projectName=\${PROJECT_NAME}_${gitBranch} \
+                                                                        -Dsonar.projectKey=\${PROJECT_NAME}_${sonarBranchSuffix} \
+                                                                        -Dsonar.projectName=\${PROJECT_NAME}_${sonarBranchSuffix} \
                                     -Dsonar.host.url=${sonarQubeUrl} \
                                     -Dsonar.token=\${SONAR_TOKEN} || true
                                 """
@@ -220,4 +221,9 @@ def call(Map cfg = [:]) {
             }
         }
     }
+}
+
+private String sanitizeForSonarProjectKey(String value) {
+    def sanitized = (value ?: 'main').replaceAll('[^A-Za-z0-9_.:-]', '_')
+    return sanitized ?: 'main'
 }
