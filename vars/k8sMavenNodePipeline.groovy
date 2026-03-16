@@ -184,6 +184,15 @@ def call(Map cfg = [:]) {
                                         echo "  Verify that the Jenkins credential '${sonarQubeCredId}' exists and has a valid Secret Text value."
                                         exit 1
                                       fi
+                                                                                                                                                        SONAR_TOKEN_CLEAN="\$(printf '%s' "\${SONAR_TOKEN}" | tr -d '\r\n')"
+                                                                                                                                                        if [ -z "\${SONAR_TOKEN_CLEAN}" ]; then
+                                                                                                                                                                echo "ERROR: SONAR_TOKEN becomes empty after trimming CR/LF."
+                                                                                                                                                                echo "  Verify Jenkins credential '${sonarQubeCredId}' does not contain only whitespace/newlines."
+                                                                                                                                                                exit 1
+                                                                                                                                                        fi
+                                                                                                                                                        if [ "\${SONAR_TOKEN_CLEAN}" != "\${SONAR_TOKEN}" ]; then
+                                                                                                                                                                echo "WARNING: SONAR_TOKEN contained CR/LF and was normalized before use."
+                                                                                                                                                        fi
 
                                                                             echo "=== SonarQube Connectivity Preflight ==="
                                                                             SONAR_HTTP_CODE="\$(curl -sS -o /tmp/sonar_server_version.txt -w "%{http_code}" "${sonarQubeUrl}/api/server/version" || true)"
@@ -197,26 +206,29 @@ def call(Map cfg = [:]) {
                                                                             fi
 
                                                                             echo "=== SonarQube Token Preflight ==="
-                                                                            SONAR_AUTH_HTTP_CODE="\$(curl -sS -o /tmp/sonar_auth_validate.json -w "%{http_code}" -H "Authorization: Bearer \${SONAR_TOKEN}" "${sonarQubeUrl}/api/authentication/validate" || true)"
-                                                                            if [ "\${SONAR_AUTH_HTTP_CODE}" = "401" ] || [ "\${SONAR_AUTH_HTTP_CODE}" = "403" ]; then
-                                                                                echo "Bearer authentication rejected (HTTP \${SONAR_AUTH_HTTP_CODE}); retrying with basic token auth."
-                                                                                SONAR_AUTH_HTTP_CODE="\$(curl -sS -o /tmp/sonar_auth_validate.json -w "%{http_code}" -u "\${SONAR_TOKEN}:" "${sonarQubeUrl}/api/authentication/validate" || true)"
+                                                                            SONAR_AUTH_HTTP_CODE="\$(curl -sS -o /tmp/sonar_auth_validate.json -w "%{http_code}" -H "Authorization: Bearer \${SONAR_TOKEN_CLEAN}" "${sonarQubeUrl}/api/authentication/validate" || true)"
+                                                                            SONAR_AUTH_VALID="false"
+                                                                            if [ "\${SONAR_AUTH_HTTP_CODE}" = "200" ] && grep -q '"valid"[[:space:]]*:[[:space:]]*true' /tmp/sonar_auth_validate.json 2>/dev/null; then
+                                                                                SONAR_AUTH_VALID="true"
+                                                                            fi
+
+                                                                            if [ "\${SONAR_AUTH_VALID}" != "true" ]; then
+                                                                                echo "Bearer validation did not confirm a valid token (HTTP \${SONAR_AUTH_HTTP_CODE}); retrying with basic token auth."
+                                                                                SONAR_AUTH_HTTP_CODE="\$(curl -sS -o /tmp/sonar_auth_validate.json -w "%{http_code}" -u "\${SONAR_TOKEN_CLEAN}:" "${sonarQubeUrl}/api/authentication/validate" || true)"
+                                                                                if [ "\${SONAR_AUTH_HTTP_CODE}" = "200" ] && grep -q '"valid"[[:space:]]*:[[:space:]]*true' /tmp/sonar_auth_validate.json 2>/dev/null; then
+                                                                                    SONAR_AUTH_VALID="true"
+                                                                                else
+                                                                                    SONAR_AUTH_VALID="false"
+                                                                                fi
                                                                             fi
                                                                             echo "SonarQube /api/authentication/validate HTTP status: \${SONAR_AUTH_HTTP_CODE}"
+                                                                            echo "SonarQube token validate result: \${SONAR_AUTH_VALID}"
 
-                                                                            if [ "\${SONAR_AUTH_HTTP_CODE}" != "200" ]; then
+                                                                            if [ "\${SONAR_AUTH_HTTP_CODE}" != "200" ] || [ "\${SONAR_AUTH_VALID}" != "true" ]; then
                                                                                 echo "ERROR: SonarQube token preflight failed (HTTP \${SONAR_AUTH_HTTP_CODE})."
                                                                                 echo "  Verify Jenkins credential '${sonarQubeCredId}' has a valid token with Execute Analysis permission."
                                                                                 if [ "${sonarFailFastOnPreflightError}" = "true" ]; then
                                                                                     exit 1
-                                                                                fi
-                                                                            else
-                                                                                if ! grep -q '"valid"[[:space:]]*:[[:space:]]*true' /tmp/sonar_auth_validate.json 2>/dev/null; then
-                                                                                    echo "ERROR: SonarQube token preflight response indicates invalid token."
-                                                                                    echo "  Verify Jenkins credential '${sonarQubeCredId}' value and SonarQube token permissions."
-                                                                                    if [ "${sonarFailFastOnPreflightError}" = "true" ]; then
-                                                                                        exit 1
-                                                                                    fi
                                                                                 fi
                                                                             fi
 
@@ -228,7 +240,7 @@ def call(Map cfg = [:]) {
                                                                                 -Dsonar.projectKey=\${PROJECT_NAME}_${sonarBranchSuffix} \
                                                                                 -Dsonar.projectName=\${PROJECT_NAME}_${sonarBranchSuffix} \
                                         -Dsonar.host.url=${sonarQubeUrl} \
-                                                                                -Dsonar.token=\${SONAR_TOKEN} \
+                                                                                -Dsonar.token=\${SONAR_TOKEN_CLEAN} \
                                                                                 -Dsonar.verbose=${sonarVerbose} \
                                                                                 -Dsonar.scanner.skipJreProvisioning=${sonarSkipJreProvisioning}
                                     """
