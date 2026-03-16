@@ -184,8 +184,8 @@ def call(Map cfg = [:]) {
                                       fi
 
                                                                             echo "=== SonarQube Connectivity Preflight ==="
-                                                                            SONAR_HTTP_CODE="$(curl -sS -o /tmp/sonar_server_version.txt -w "%{http_code}" "${sonarQubeUrl}/api/server/version" || true)"
-                                                                            SONAR_SERVER_VERSION="$(cat /tmp/sonar_server_version.txt 2>/dev/null || true)"
+                                                                            SONAR_HTTP_CODE="\$(curl -sS -o /tmp/sonar_server_version.txt -w "%{http_code}" "${sonarQubeUrl}/api/server/version" || true)"
+                                                                            SONAR_SERVER_VERSION="\$(cat /tmp/sonar_server_version.txt 2>/dev/null || true)"
                                                                             echo "SonarQube /api/server/version HTTP status: \${SONAR_HTTP_CODE}"
                                                                             if [ -n "\${SONAR_SERVER_VERSION}" ]; then
                                                                                 echo "SonarQube server version: \${SONAR_SERVER_VERSION}"
