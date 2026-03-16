@@ -148,25 +148,36 @@ def call(Map cfg = [:]) {
                 steps {
                     container('build') {
                         dir('repo') {
-                            withCredentials([string(credentialsId: sonarQubeCredId, variable: 'SONAR_TOKEN')]) {
-                                sh """#!/bin/bash
-                                  set -euo pipefail
-                                  echo "=== Maven Version ==="
-                                  mvn -v
+                            // catchError: SonarQube失敗はビルド全体をFAILUREにしない（UNSTABLEに留める）
+                            catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') {
+                                withCredentials([string(credentialsId: sonarQubeCredId, variable: 'SONAR_TOKEN')]) {
+                                    sh """#!/bin/bash
+                                      set -eo pipefail
 
-                                  echo "=== Running SonarQube Analysis Building with profile: ${mavenDefaultProfile} ==="
-                                  echo "SonarQube URL: ${sonarQubeUrl}"
+                                      echo "=== Maven Version ==="
+                                      mvn -v
 
-                                  echo "=== Building with profile: ${mavenDefaultProfile} ==="
+                                      echo "=== Running SonarQube Analysis Building with profile: ${mavenDefaultProfile} ==="
+                                      echo "SonarQube URL: ${sonarQubeUrl}"
 
-                                  PROJECT_NAME="${sonarProjectName}"
-                                  mvn clean verify -P "${mavenDefaultProfile}" -DskipTests=false \
-                                  org.sonarsource.scanner.maven:sonar-maven-plugin:sonar \
-                                                                        -Dsonar.projectKey=\${PROJECT_NAME}_${sonarBranchSuffix} \
-                                                                        -Dsonar.projectName=\${PROJECT_NAME}_${sonarBranchSuffix} \
-                                    -Dsonar.host.url=${sonarQubeUrl} \
-                                    -Dsonar.token=\${SONAR_TOKEN} || true
-                                """
+                                      # SONAR_TOKEN の事前検証（-u なしでも明示チェック）
+                                      if [ -z "\${SONAR_TOKEN:-}" ]; then
+                                        echo "ERROR: SONAR_TOKEN is empty or not set."
+                                        echo "  Verify that the Jenkins credential '${sonarQubeCredId}' exists and has a valid Secret Text value."
+                                        exit 1
+                                      fi
+
+                                      echo "=== Building with profile: ${mavenDefaultProfile} ==="
+
+                                      PROJECT_NAME="${sonarProjectName}"
+                                      mvn clean verify -P "${mavenDefaultProfile}" -DskipTests=false \
+                                      org.sonarsource.scanner.maven:sonar-maven-plugin:sonar \
+                                                                            -Dsonar.projectKey=\${PROJECT_NAME}_${sonarBranchSuffix} \
+                                                                            -Dsonar.projectName=\${PROJECT_NAME}_${sonarBranchSuffix} \
+                                        -Dsonar.host.url=${sonarQubeUrl} \
+                                        -Dsonar.token=\${SONAR_TOKEN}
+                                    """
+                                }
                             }
                         }
                     }
@@ -175,8 +186,11 @@ def call(Map cfg = [:]) {
                     success {
                         echo "✅ SonarQube analysis completed - check results at ${sonarQubeUrl}"
                     }
+                    unstable {
+                        echo "⚠️ SonarQube analysis failed - build marked UNSTABLE. Check Jenkins credential '${sonarQubeCredId}' and SonarQube logs."
+                    }
                     failure {
-                        echo "⚠️ SonarQube analysis failed - will continue build"
+                        echo "⚠️ SonarQube analysis failed - check console logs for details"
                     }
                 }
             }
