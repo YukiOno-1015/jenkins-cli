@@ -32,7 +32,17 @@ def call(Map cfg = [:]) {
     def skipArchive = cfg.get('skipArchive', repoConfig.skipArchive)
 
     def enableSonarQube = cfg.get('enableSonarQube', repoConfig.sonarEnabled)
-    def sonarQubeCredId = cfg.get('sonarQubeCredentialsId', 'sonarqube-token')
+    def configuredSonarCredId = repoConfig.sonarQubeCredentialsId?.toString()?.trim()
+    def requestedSonarCredId = cfg.containsKey('sonarQubeCredentialsId') ? cfg.get('sonarQubeCredentialsId') : null
+    requestedSonarCredId = requestedSonarCredId?.toString()?.trim()
+    def sonarQubeCredId = requestedSonarCredId ?: configuredSonarCredId ?: 'sonarqube-token'
+    if (!sonarQubeCredId) {
+        error("SonarQube credentials ID could not be resolved for ${repoConfig.repoName}. Set repositoryConfig.sonarQubeCredentialsId or sonarQubeCredentialsId.")
+    }
+    def sonarCredSource = requestedSonarCredId ? 'pipeline argument' : (configuredSonarCredId ? 'repositoryConfig' : 'default')
+    echo "SonarQube credentials ID: ${sonarQubeCredId} (source: ${sonarCredSource})"
+
+    def sonarMavenPluginVersion = cfg.get('sonarMavenPluginVersion', '5.5.0.6356')
     def sonarQubeUrlRaw = cfg.get('sonarQubeUrl', 'http://sonarqube-sonarqube.sonarqube.svc.cluster.local:9000')
     def sonarQubeUrl = sonarQubeUrlRaw?.replaceFirst('^hhttp', 'http')
     if (sonarQubeUrl && !sonarQubeUrl.startsWith('http://') && !sonarQubeUrl.startsWith('https://')) {
@@ -149,7 +159,7 @@ def call(Map cfg = [:]) {
                     container('build') {
                         dir('repo') {
                             // catchError: SonarQube失敗はビルド全体をFAILUREにしない（UNSTABLEに留める）
-                            catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') {
+                            catchError(buildResult: 'UNSTABLE', stageResult: 'UNSTABLE') {
                                 withCredentials([string(credentialsId: sonarQubeCredId, variable: 'SONAR_TOKEN')]) {
                                     sh """#!/bin/bash
                                       set -eo pipefail
@@ -159,6 +169,8 @@ def call(Map cfg = [:]) {
 
                                       echo "=== Running SonarQube Analysis Building with profile: ${mavenDefaultProfile} ==="
                                       echo "SonarQube URL: ${sonarQubeUrl}"
+                                                                            echo "SonarQube credentials ID: ${sonarQubeCredId}"
+                                                                            echo "Sonar Maven plugin version: ${sonarMavenPluginVersion}"
 
                                       # SONAR_TOKEN の事前検証（-u なしでも明示チェック）
                                       if [ -z "\${SONAR_TOKEN:-}" ]; then
@@ -171,7 +183,7 @@ def call(Map cfg = [:]) {
 
                                       PROJECT_NAME="${sonarProjectName}"
                                       mvn clean verify -P "${mavenDefaultProfile}" -DskipTests=false \
-                                      org.sonarsource.scanner.maven:sonar-maven-plugin:sonar \
+                                      org.sonarsource.scanner.maven:sonar-maven-plugin:${sonarMavenPluginVersion}:sonar \
                                                                             -Dsonar.projectKey=\${PROJECT_NAME}_${sonarBranchSuffix} \
                                                                             -Dsonar.projectName=\${PROJECT_NAME}_${sonarBranchSuffix} \
                                         -Dsonar.host.url=${sonarQubeUrl} \
@@ -212,6 +224,9 @@ def call(Map cfg = [:]) {
         post {
             success {
                 echo "✅ Build SUCCESS (profile: ${mavenDefaultProfile})"
+            }
+            unstable {
+                echo "⚠️ Build UNSTABLE (profile: ${mavenDefaultProfile}) - check SonarQube result and credentials"
             }
             failure {
                 echo "❌ Build FAILED - check console logs for details"
