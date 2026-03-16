@@ -45,6 +45,7 @@ def call(Map cfg = [:]) {
     def sonarMavenPluginVersion = cfg.get('sonarMavenPluginVersion', '5.5.0.6356')
     def sonarSkipJreProvisioning = cfg.containsKey('sonarSkipJreProvisioning') ? cfg.get('sonarSkipJreProvisioning').toString().toBoolean() : true
     def sonarVerbose = cfg.containsKey('sonarVerbose') ? cfg.get('sonarVerbose').toString().toBoolean() : true
+    def sonarFailFastOnPreflightError = cfg.containsKey('sonarFailFastOnPreflightError') ? cfg.get('sonarFailFastOnPreflightError').toString().toBoolean() : true
     def sonarQubeUrlRaw = cfg.get('sonarQubeUrl', 'http://sonarqube-sonarqube.sonarqube.svc.cluster.local:9000')
     def sonarQubeUrl = sonarQubeUrlRaw?.replaceFirst('^hhttp', 'http')
     if (sonarQubeUrl && !sonarQubeUrl.startsWith('http://') && !sonarQubeUrl.startsWith('https://')) {
@@ -175,6 +176,7 @@ def call(Map cfg = [:]) {
                                                                             echo "Sonar Maven plugin version: ${sonarMavenPluginVersion}"
                                                                             echo "Sonar skip JRE provisioning: ${sonarSkipJreProvisioning}"
                                                                             echo "Sonar verbose: ${sonarVerbose}"
+                                                                            echo "Sonar fail-fast on preflight error: ${sonarFailFastOnPreflightError}"
 
                                       # SONAR_TOKEN の事前検証（-u なしでも明示チェック）
                                       if [ -z "\${SONAR_TOKEN:-}" ]; then
@@ -192,6 +194,30 @@ def call(Map cfg = [:]) {
                                                                             fi
                                                                             if [ "\${SONAR_HTTP_CODE}" = "000" ]; then
                                                                                 echo "WARNING: SonarQube endpoint is unreachable from this pod. Check DNS/network/service URL."
+                                                                            fi
+
+                                                                            echo "=== SonarQube Token Preflight ==="
+                                                                            SONAR_AUTH_HTTP_CODE="\$(curl -sS -o /tmp/sonar_auth_validate.json -w "%{http_code}" -H "Authorization: Bearer \${SONAR_TOKEN}" "${sonarQubeUrl}/api/authentication/validate" || true)"
+                                                                            if [ "\${SONAR_AUTH_HTTP_CODE}" = "401" ] || [ "\${SONAR_AUTH_HTTP_CODE}" = "403" ]; then
+                                                                                echo "Bearer authentication rejected (HTTP \${SONAR_AUTH_HTTP_CODE}); retrying with basic token auth."
+                                                                                SONAR_AUTH_HTTP_CODE="\$(curl -sS -o /tmp/sonar_auth_validate.json -w "%{http_code}" -u "\${SONAR_TOKEN}:" "${sonarQubeUrl}/api/authentication/validate" || true)"
+                                                                            fi
+                                                                            echo "SonarQube /api/authentication/validate HTTP status: \${SONAR_AUTH_HTTP_CODE}"
+
+                                                                            if [ "\${SONAR_AUTH_HTTP_CODE}" != "200" ]; then
+                                                                                echo "ERROR: SonarQube token preflight failed (HTTP \${SONAR_AUTH_HTTP_CODE})."
+                                                                                echo "  Verify Jenkins credential '${sonarQubeCredId}' has a valid token with Execute Analysis permission."
+                                                                                if [ "${sonarFailFastOnPreflightError}" = "true" ]; then
+                                                                                    exit 1
+                                                                                fi
+                                                                            else
+                                                                                if ! grep -q '"valid"[[:space:]]*:[[:space:]]*true' /tmp/sonar_auth_validate.json 2>/dev/null; then
+                                                                                    echo "ERROR: SonarQube token preflight response indicates invalid token."
+                                                                                    echo "  Verify Jenkins credential '${sonarQubeCredId}' value and SonarQube token permissions."
+                                                                                    if [ "${sonarFailFastOnPreflightError}" = "true" ]; then
+                                                                                        exit 1
+                                                                                    fi
+                                                                                fi
                                                                             fi
 
                                       echo "=== Building with profile: ${mavenDefaultProfile} ==="
@@ -216,7 +242,7 @@ def call(Map cfg = [:]) {
                         echo "✅ SonarQube analysis completed - check results at ${sonarQubeUrl}"
                     }
                     unstable {
-                        echo "⚠️ SonarQube analysis failed - build marked UNSTABLE. Check credential '${sonarQubeCredId}', SonarQube connectivity, and scanner bootstrap logs."
+                        echo "⚠️ SonarQube analysis failed - build marked UNSTABLE. Check credential '${sonarQubeCredId}', token preflight logs, and scanner bootstrap logs."
                     }
                     failure {
                         echo "⚠️ SonarQube analysis failed - check console logs for details"
