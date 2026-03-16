@@ -10,7 +10,7 @@ def call(Map args = [:]) {
     def knownHost = args.get('knownHost', 'github.com')
 
     // sshCredentialsIdが指定されていなければrepositoryConfigから取得
-    def sshCred = args.sshCredentialsId
+    def sshCred = args.sshCredentialsId?.toString()?.trim()
     if (!sshCred) {
         def config = repositoryConfig(repoUrl)
         sshCred = config.credentialsId
@@ -20,6 +20,8 @@ def call(Map args = [:]) {
     if (!sshCred) {
         error('sshCredentialsId could not be determined')
     }
+
+    echo "Using SSH credentials ID: ${sshCred}"
 
     sshagent(credentials: [sshCred]) {
         sh """#!/bin/bash
@@ -45,6 +47,16 @@ def call(Map args = [:]) {
 
           # Gitクローン
           echo "Cloning repository: ${repoUrl} (branch: ${branch})"
+
+                    # GitHubへのSSH認証を事前確認（接続成功時も終了コードは0/1の可能性があるためログ判定）
+                    authOutput="\$(ssh -T git@${knownHost} 2>&1 || true)"
+                    echo "SSH auth preflight output: \${authOutput}"
+                    if echo "\${authOutput}" | grep -qi "Permission denied (publickey)"; then
+                        echo "ERROR: SSH authentication failed for Jenkins credentials ID: ${sshCred}"
+                        echo "Please verify the private key in Jenkins and repository access on GitHub."
+                        exit 128
+                    fi
+
           git clone --depth 1 --single-branch --branch '${branch}' '${repoUrl}' '${dirName}'
 
           cd '${dirName}'

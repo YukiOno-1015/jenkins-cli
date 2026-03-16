@@ -12,7 +12,17 @@ def call(Map cfg = [:]) {
     def imagePullSecret = cfg.get('imagePullSecret', 'docker-hub')
 
     def gitBranch = cfg.get('gitBranch', 'release1.0.0')
-    def gitSshCredId = cfg.get('gitSshCredentialsId', repoConfig.credentialsId)
+    def configuredGitCredId = repoConfig.credentialsId?.toString()?.trim()
+    def requestedGitCredId = cfg.containsKey('gitSshCredentialsId') ? cfg.get('gitSshCredentialsId') : null
+    requestedGitCredId = requestedGitCredId?.toString()?.trim()
+    def gitSshCredId = requestedGitCredId ?: configuredGitCredId
+
+    if (!gitSshCredId) {
+        error("Git SSH credentials ID could not be resolved for ${repoConfig.repoName}. Set repositoryConfig.credentialsId or gitSshCredentialsId.")
+    }
+
+    def gitCredSource = requestedGitCredId ? 'pipeline argument' : 'repositoryConfig'
+    echo "Git SSH credentials ID: ${gitSshCredId} (source: ${gitCredSource})"
 
     def mavenProfileChoices = cfg.get('mavenProfileChoices', repoConfig.buildProfiles)
     def mavenDefaultProfile = cfg.get('mavenDefaultProfile', repoConfig.defaultProfile)
