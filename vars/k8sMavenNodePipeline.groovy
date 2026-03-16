@@ -43,6 +43,8 @@ def call(Map cfg = [:]) {
     echo "SonarQube credentials ID: ${sonarQubeCredId} (source: ${sonarCredSource})"
 
     def sonarMavenPluginVersion = cfg.get('sonarMavenPluginVersion', '5.5.0.6356')
+    def sonarSkipJreProvisioning = cfg.containsKey('sonarSkipJreProvisioning') ? cfg.get('sonarSkipJreProvisioning').toString().toBoolean() : true
+    def sonarVerbose = cfg.containsKey('sonarVerbose') ? cfg.get('sonarVerbose').toString().toBoolean() : true
     def sonarQubeUrlRaw = cfg.get('sonarQubeUrl', 'http://sonarqube-sonarqube.sonarqube.svc.cluster.local:9000')
     def sonarQubeUrl = sonarQubeUrlRaw?.replaceFirst('^hhttp', 'http')
     if (sonarQubeUrl && !sonarQubeUrl.startsWith('http://') && !sonarQubeUrl.startsWith('https://')) {
@@ -171,6 +173,8 @@ def call(Map cfg = [:]) {
                                       echo "SonarQube URL: ${sonarQubeUrl}"
                                                                             echo "SonarQube credentials ID: ${sonarQubeCredId}"
                                                                             echo "Sonar Maven plugin version: ${sonarMavenPluginVersion}"
+                                                                            echo "Sonar skip JRE provisioning: ${sonarSkipJreProvisioning}"
+                                                                            echo "Sonar verbose: ${sonarVerbose}"
 
                                       # SONAR_TOKEN の事前検証（-u なしでも明示チェック）
                                       if [ -z "\${SONAR_TOKEN:-}" ]; then
@@ -179,15 +183,28 @@ def call(Map cfg = [:]) {
                                         exit 1
                                       fi
 
+                                                                            echo "=== SonarQube Connectivity Preflight ==="
+                                                                            SONAR_HTTP_CODE="$(curl -sS -o /tmp/sonar_server_version.txt -w "%{http_code}" "${sonarQubeUrl}/api/server/version" || true)"
+                                                                            SONAR_SERVER_VERSION="$(cat /tmp/sonar_server_version.txt 2>/dev/null || true)"
+                                                                            echo "SonarQube /api/server/version HTTP status: \${SONAR_HTTP_CODE}"
+                                                                            if [ -n "\${SONAR_SERVER_VERSION}" ]; then
+                                                                                echo "SonarQube server version: \${SONAR_SERVER_VERSION}"
+                                                                            fi
+                                                                            if [ "\${SONAR_HTTP_CODE}" = "000" ]; then
+                                                                                echo "WARNING: SonarQube endpoint is unreachable from this pod. Check DNS/network/service URL."
+                                                                            fi
+
                                       echo "=== Building with profile: ${mavenDefaultProfile} ==="
 
                                       PROJECT_NAME="${sonarProjectName}"
-                                      mvn clean verify -P "${mavenDefaultProfile}" -DskipTests=false \
+                                                                            mvn -e clean verify -P "${mavenDefaultProfile}" -DskipTests=false \
                                       org.sonarsource.scanner.maven:sonar-maven-plugin:${sonarMavenPluginVersion}:sonar \
-                                                                            -Dsonar.projectKey=\${PROJECT_NAME}_${sonarBranchSuffix} \
-                                                                            -Dsonar.projectName=\${PROJECT_NAME}_${sonarBranchSuffix} \
+                                                                                -Dsonar.projectKey=\${PROJECT_NAME}_${sonarBranchSuffix} \
+                                                                                -Dsonar.projectName=\${PROJECT_NAME}_${sonarBranchSuffix} \
                                         -Dsonar.host.url=${sonarQubeUrl} \
-                                        -Dsonar.token=\${SONAR_TOKEN}
+                                                                                -Dsonar.token=\${SONAR_TOKEN} \
+                                                                                -Dsonar.verbose=${sonarVerbose} \
+                                                                                -Dsonar.scanner.skipJreProvisioning=${sonarSkipJreProvisioning}
                                     """
                                 }
                             }
@@ -199,7 +216,7 @@ def call(Map cfg = [:]) {
                         echo "✅ SonarQube analysis completed - check results at ${sonarQubeUrl}"
                     }
                     unstable {
-                        echo "⚠️ SonarQube analysis failed - build marked UNSTABLE. Check Jenkins credential '${sonarQubeCredId}' and SonarQube logs."
+                        echo "⚠️ SonarQube analysis failed - build marked UNSTABLE. Check credential '${sonarQubeCredId}', SonarQube connectivity, and scanner bootstrap logs."
                     }
                     failure {
                         echo "⚠️ SonarQube analysis failed - check console logs for details"
