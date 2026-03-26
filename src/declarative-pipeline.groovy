@@ -12,13 +12,19 @@ def RULE_DEFS = [
     [desc: 'allowlist-jenkins-svc', hostname: 'jenkins-cli.sk4869.info'],
     [desc: 'allowlist-sonar',       hostname: 'sonar-cli.sk4869.info'],
 ]
-def CF_API_TOKEN_CREDENTIAL_ID = 'CF_API_TOKEN'
-def CF_ZONE_ID_CREDENTIAL_ID = 'CF_ZONE_ID'
+def CF_CREDENTIAL_CANDIDATES = [
+    [token: 'CF_API_TOKEN', zone: 'CF_ZONE_ID'],
+    [token: 'cf-api-token', zone: 'cf-zone-id'],
+]
 // ---------------------------------------------------------------
 
 pipeline {
     agent { label 'machost' }
     triggers { cron('H/10 * * * *') }
+    options {
+        skipDefaultCheckout(true)
+        timestamps()
+    }
 
     environment {
         IP_SOURCE_URL = 'https://ifconfig.me'
@@ -29,22 +35,23 @@ pipeline {
 
     stages {
 
-        stage('Pull Latest Changes') {
+        stage('Checkout SCM') {
             steps {
-                sh '''
-                    git pull origin main
-                    git log -1 --oneline
-                '''
+                script {
+                    retry(3) {
+                        timeout(time: 3, unit: 'MINUTES') {
+                            checkout scm
+                        }
+                    }
+                }
+                sh 'git log -1 --oneline || true'
             }
         }
 
         stage('Verify Cloudflare Token') {
             steps {
-                withCredentials([
-                    string(credentialsId: CF_API_TOKEN_CREDENTIAL_ID, variable: 'CF_API_TOKEN'),
-                    string(credentialsId: CF_ZONE_ID_CREDENTIAL_ID,   variable: 'CF_ZONE_ID'),
-                ]) {
-                    script {
+                script {
+                    withCloudflareCredentials {
                         echo '=== Verifying API Token ==='
                         def res = cfGet("${env.CF_API_BASE}/user/tokens/verify")
                         if (res.code != 200) {
@@ -99,11 +106,8 @@ pipeline {
         stage('Update Cloudflare Allowlist') {
             when { environment name: 'IP_CHANGED', value: 'true' }
             steps {
-                withCredentials([
-                    string(credentialsId: CF_API_TOKEN_CREDENTIAL_ID, variable: 'CF_API_TOKEN'),
-                    string(credentialsId: CF_ZONE_ID_CREDENTIAL_ID,   variable: 'CF_ZONE_ID'),
-                ]) {
-                    script {
+                script {
+                    withCloudflareCredentials {
                         // 1. エントリポイント ruleset 取得
                         echo '=== Fetching Cloudflare entrypoint ruleset ==='
                         def rulesetRes = cfGet(
@@ -213,4 +217,35 @@ def parseResponse(String raw) {
     def bodyTxt = lines[0..-2].join('\n')
     def body   = readJSON(text: bodyTxt ?: '{}')
     return [code: code, body: body, raw: bodyTxt]
+}
+
+/** Cloudflare credential ID の差分を吸収して実行する */
+def withCloudflareCredentials(Closure body) {
+    Exception lastMissingCredentialsError = null
+
+    for (def pair in CF_CREDENTIAL_CANDIDATES) {
+        try {
+            withCredentials([
+                string(credentialsId: pair.token, variable: 'CF_API_TOKEN'),
+                string(credentialsId: pair.zone, variable: 'CF_ZONE_ID'),
+            ]) {
+                echo "Using Cloudflare credentials: token='${pair.token}', zone='${pair.zone}'"
+                body.call()
+            }
+            return
+        } catch (Exception e) {
+            def message = e.getMessage() ?: ''
+            if (message.contains('Could not find credentials entry with ID')) {
+                lastMissingCredentialsError = e
+                echo "Credential IDs not found, trying next pair..."
+                continue
+            }
+            throw e
+        }
+    }
+
+    if (lastMissingCredentialsError != null) {
+        throw lastMissingCredentialsError
+    }
+    error('No Cloudflare credential candidates configured')
 }
