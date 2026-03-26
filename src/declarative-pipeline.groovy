@@ -12,10 +12,6 @@ def RULE_DEFS = [
     [desc: 'allowlist-jenkins-svc', hostname: 'jenkins-cli.sk4869.info'],
     [desc: 'allowlist-sonar',       hostname: 'sonar-cli.sk4869.info'],
 ]
-def CF_CREDENTIAL_CANDIDATES = [
-    [token: 'CF_API_TOKEN', zone: 'CF_ZONE_ID'],
-    [token: 'cf-api-token', zone: 'cf-zone-id'],
-]
 // ---------------------------------------------------------------
 
 pipeline {
@@ -221,9 +217,13 @@ def parseResponse(String raw) {
 
 /** Cloudflare credential ID の差分を吸収して実行する */
 def withCloudflareCredentials(Closure body) {
+    def credentialCandidates = [
+        [token: 'CF_API_TOKEN', zone: 'CF_ZONE_ID'],
+        [token: 'cf-api-token', zone: 'cf-zone-id'],
+    ]
     Exception lastMissingCredentialsError = null
 
-    for (def pair in CF_CREDENTIAL_CANDIDATES) {
+    for (def pair in credentialCandidates) {
         try {
             withCredentials([
                 string(credentialsId: pair.token, variable: 'CF_API_TOKEN'),
