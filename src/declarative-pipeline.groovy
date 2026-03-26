@@ -3,6 +3,8 @@
 // 必要な Jenkins Credentials（Kind: Secret text）:
 //   CF_API_TOKEN : Cloudflare API Token（Zone.Firewall Services - Edit 権限）
 //   CF_ZONE_ID   : Cloudflare Zone ID
+// もしくは、実行環境に CF_API_TOKEN / CF_ZONE_ID が環境変数として注入されていれば、
+// Jenkins Credentials が無くてもその値を利用する
 //
 // 必要なプラグイン: Pipeline Utility Steps（readJSON）
 
@@ -217,6 +219,16 @@ def parseResponse(String raw) {
 
 /** Cloudflare credential ID の差分を吸収して実行する */
 def withCloudflareCredentials(Closure body) {
+    def envToken = env.CF_API_TOKEN?.trim()
+    def envZoneId = env.CF_ZONE_ID?.trim()
+    if (envToken && envZoneId) {
+        echo 'Using pre-injected environment variables for Cloudflare credentials'
+        withEnv(["CF_API_TOKEN=${envToken}", "CF_ZONE_ID=${envZoneId}"]) {
+            body.call()
+        }
+        return
+    }
+
     def credentialCandidates = [
         [token: 'CF_API_TOKEN', zone: 'CF_ZONE_ID'],
         [token: 'cf-api-token', zone: 'cf-zone-id'],
