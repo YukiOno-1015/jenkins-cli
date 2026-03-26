@@ -12,6 +12,8 @@ def RULE_DEFS = [
     [desc: 'allowlist-jenkins-svc', hostname: 'jenkins-cli.sk4869.info'],
     [desc: 'allowlist-sonar',       hostname: 'sonar-cli.sk4869.info'],
 ]
+def CF_API_TOKEN_CREDENTIAL_ID = 'CF_API_TOKEN'
+def CF_ZONE_ID_CREDENTIAL_ID = 'CF_ZONE_ID'
 // ---------------------------------------------------------------
 
 pipeline {
@@ -39,8 +41,8 @@ pipeline {
         stage('Verify Cloudflare Token') {
             steps {
                 withCredentials([
-                    string(credentialsId: 'cf-api-token', variable: 'CF_API_TOKEN'),
-                    string(credentialsId: 'cf-zone-id',   variable: 'CF_ZONE_ID'),
+                    string(credentialsId: CF_API_TOKEN_CREDENTIAL_ID, variable: 'CF_API_TOKEN'),
+                    string(credentialsId: CF_ZONE_ID_CREDENTIAL_ID,   variable: 'CF_ZONE_ID'),
                 ]) {
                     script {
                         echo '=== Verifying API Token ==='
@@ -98,8 +100,8 @@ pipeline {
             when { environment name: 'IP_CHANGED', value: 'true' }
             steps {
                 withCredentials([
-                    string(credentialsId: 'CF_API_TOKEN', variable: 'CF_API_TOKEN'),
-                    string(credentialsId: 'CF_ZONE_ID',   variable: 'CF_ZONE_ID'),
+                    string(credentialsId: CF_API_TOKEN_CREDENTIAL_ID, variable: 'CF_API_TOKEN'),
+                    string(credentialsId: CF_ZONE_ID_CREDENTIAL_ID,   variable: 'CF_ZONE_ID'),
                 ]) {
                     script {
                         // 1. エントリポイント ruleset 取得
