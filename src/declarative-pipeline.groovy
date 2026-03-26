@@ -39,8 +39,8 @@ pipeline {
         stage('Verify Cloudflare Token') {
             steps {
                 withCredentials([
-                    string(credentialsId: 'CF_API_TOKEN', variable: 'cf-api-token'),
-                    string(credentialsId: 'CF_ZONE_ID',   variable: 'f-zone-id'),
+                    string(credentialsId: 'cf-api-token', variable: 'CF_API_TOKEN'),
+                    string(credentialsId: 'cf-zone-id',   variable: 'CF_ZONE_ID'),
                 ]) {
                     script {
                         echo '=== Verifying API Token ==='
