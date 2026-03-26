@@ -181,7 +181,7 @@ pipeline {
 def cfGet(String url) {
     def raw = sh(
         script: """curl -s -w '\\n%{http_code}' \
-            -H 'Authorization: Bearer \$CF_API_TOKEN' \
+            -H "Authorization: Bearer \$CF_API_TOKEN" \
             '${url}'""",
         returnStdout: true
     ).trim()
@@ -197,7 +197,7 @@ def cfPatch(String url, Map bodyMap) {
     def raw = sh(
         script: """curl -s -w '\\n%{http_code}' \
             -X PATCH \
-            -H 'Authorization: Bearer \$CF_API_TOKEN' \
+            -H "Authorization: Bearer \$CF_API_TOKEN" \
             -H 'Content-Type: application/json' \
             --data "@${tmpFile}" \
             '${url}'""",
