@@ -63,7 +63,7 @@ def runUpdateOnHost(host, sshUser, updateCommand, updateCommandNoSudo, sakuraDoc
 
 pipeline {
     agent any
-    triggers { cron('H 3 * * *') } // 毎日3時に実行（必要に応じて変更）
+    triggers { cron('TZ=Asia/Tokyo\nH 3 * * *') } // 日本時間で毎日3時に実行（必要に応じて変更）
     options { timestamps() }
     // パスフレーズ不要。ssh-agent/キーチェーン/.ssh/configに依存
     stages {

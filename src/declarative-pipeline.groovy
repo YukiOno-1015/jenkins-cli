@@ -18,7 +18,7 @@ def RULE_DEFS = [
 
 pipeline {
     agent { label 'machost' }
-    triggers { cron('H/10 * * * *') }
+    triggers { cron('TZ=Asia/Tokyo\nH/10 * * * *') }
     options {
         skipDefaultCheckout(true)
         timestamps()
