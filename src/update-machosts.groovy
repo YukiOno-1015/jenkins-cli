@@ -1,9 +1,8 @@
 // Jenkins用: 複数machostサーバにsshで自動アップデートを定期実行
-// サーバリストは下記配列で管理
-// sakura-dockerのsudoパスワードのみJenkins Credentialsを利用
+// sakura-docker のみ sudo パスワードを Jenkins Credentials から利用
 
-// サーバリスト（ホスト名またはIPアドレス）
 def TARGET_HOSTS = [
+    'sakura-docker',
     'nico',
     'umi',
     'nozomi',
@@ -11,7 +10,6 @@ def TARGET_HOSTS = [
     'eri',
     'tunnel01',
     'tunnel02',
-    'sakura-docker',
     'k8s-ctrl01',
     'k8s-ctrl02',
     'k8s-ctrl03',
@@ -25,64 +23,159 @@ def TARGET_HOSTS = [
     'k8s-node06',
     'nfs01',
     'nfs02',
-    // 必要に応じて追加
 ]
 
-def UPDATE_COMMAND = 'sudo apt-get clean && sudo rm -rf /var/lib/apt/lists/* && sudo apt-get update && sudo apt-get full-upgrade -y && sudo apt-get autoremove --purge -y'
-def UPDATE_COMMAND_NO_SUDO = 'apt-get clean && rm -rf /var/lib/apt/lists/* && apt-get update && apt-get full-upgrade -y && apt-get autoremove --purge -y'
+def SSH_USER = 'honoka'
 def SAKURA_DOCKER_SUDO_PASSWORD_CREDENTIAL_ID = 'sakura-docker-sudo-password'
-def APT_EXPIRED_METADATA_WORKAROUND_HOSTS = TARGET_HOSTS
 
-def SSH_USER = 'honoka' // サーバ側のユーザー名に合わせて変更
+// root で直接入るホスト
+def ROOT_LOGIN_HOSTS = [
+    'nico',
+    'umi',
+    'nozomi',
+    'maki',
+    'eri'
+]
 
-def runUpdateOnHost(host, sshUser, updateCommand, updateCommandNoSudo, sakuraDockerSudoPasswordCredentialId, aptExpiredMetadataWorkaroundHosts) {
+// どうしても Valid-Until 回避が必要なホストだけ入れる
+// 今回の 404 は mirror mismatch なので、まずは空推奨
+def APT_EXPIRED_METADATA_WORKAROUND_HOSTS = [
+]
+
+// Debian ミラーの補正 + apt 更新
+def REMOTE_PREPARE_APT = '''
+set -euo pipefail
+
+if [ -f /etc/apt/sources.list ]; then
+  cp -an /etc/apt/sources.list /etc/apt/sources.list.bak.before-jenkins-update || true
+
+  sed -i \
+    -e 's|http://ftp\\.jp\\.debian\\.org/debian|https://deb.debian.org/debian|g' \
+    -e 's|https://ftp\\.jp\\.debian\\.org/debian|https://deb.debian.org/debian|g' \
+    -e 's|http://security\\.debian\\.org|https://security.debian.org|g' \
+    /etc/apt/sources.list || true
+fi
+
+if [ -d /etc/apt/sources.list.d ]; then
+  find /etc/apt/sources.list.d -type f \\( -name "*.list" -o -name "*.sources" \\) -print0 | \
+    xargs -0 -r sed -i \
+      -e 's|http://ftp\\.jp\\.debian\\.org/debian|https://deb.debian.org/debian|g' \
+      -e 's|https://ftp\\.jp\\.debian\\.org/debian|https://deb.debian.org/debian|g' \
+      -e 's|http://security\\.debian\\.org|https://security.debian.org|g' || true
+fi
+'''
+
+def buildUpdateCommand(boolean useValidUntilWorkaround = false) {
+    def updatePart = useValidUntilWorkaround
+        ? 'apt-get -o Acquire::Check-Valid-Until=false update'
+        : 'apt-get update'
+
+    return """
+set -euo pipefail
+export DEBIAN_FRONTEND=noninteractive
+
+${REMOTE_PREPARE_APT}
+
+apt-get clean
+rm -rf /var/lib/apt/lists/*
+${updatePart}
+apt-get full-upgrade -y
+apt-get autoremove --purge -y
+""".trim()
+}
+
+def shellSingleQuote(String s) {
+    return s.replace("'", "'\"'\"'")
+}
+
+def runSshAsRoot(host, remoteScript) {
+    sh """
+        ssh -o StrictHostKeyChecking=no -o BatchMode=yes -A root@${host} 'bash -lc '${"'" + shellSingleQuote(remoteScript) + "'"}''
+    """
+}
+
+def runSshWithSudo(host, sshUser, remoteScript) {
+    sh """
+        ssh -o StrictHostKeyChecking=no -o BatchMode=yes -A ${sshUser}@${host} 'sudo bash -lc '${"'" + shellSingleQuote(remoteScript) + "'"}''
+    """
+}
+
+def runSshWithPasswordSudo(host, sshUser, credentialId, remoteScript) {
+    withCredentials([string(credentialsId: credentialId, variable: 'SUDO_PASSWORD')]) {
+        sh """
+            set +x
+            CLEAN_SUDO_PASSWORD="\$(printf '%s' "\$SUDO_PASSWORD" | tr -d '\\r\\n')"
+            printf '%s\\n' "\$CLEAN_SUDO_PASSWORD" | \
+              ssh -tt -o StrictHostKeyChecking=no -o BatchMode=yes -A ${sshUser}@${host} \
+              "sudo -k -S -p '' bash -lc '${shellSingleQuote(remoteScript)}'"
+        """
+    }
+}
+
+def runUpdateOnHost(host, sshUser, sakuraDockerSudoPasswordCredentialId, aptExpiredMetadataWorkaroundHosts) {
     echo "==== Updating ${host} ===="
-    def effectiveUpdateCommand = updateCommand
-    def effectiveUpdateCommandNoSudo = updateCommandNoSudo
-    if (aptExpiredMetadataWorkaroundHosts.contains(host)) {
-        effectiveUpdateCommand = updateCommand.replace('sudo apt-get update', 'sudo apt-get -o Acquire::Check-Valid-Until=false update')
-        effectiveUpdateCommandNoSudo = updateCommandNoSudo.replace('apt-get update', 'apt-get -o Acquire::Check-Valid-Until=false update')
+    def useWorkaround = aptExpiredMetadataWorkaroundHosts.contains(host)
+    def remoteScript = buildUpdateCommand(useWorkaround)
+
+    if (ROOT_LOGIN_HOSTS.contains(host)) {
+        runSshAsRoot(host, remoteScript)
+        return
     }
 
-    if (host == 'nico' || host == 'umi' || host == 'nozomi' || host == 'maki' || host == 'eri') {
-        sh "ssh -o StrictHostKeyChecking=no -o BatchMode=yes -A root@${host} '${effectiveUpdateCommand}'"
-        return
-    }
     if (host == 'sakura-docker') {
-        withCredentials([string(credentialsId: sakuraDockerSudoPasswordCredentialId, variable: 'SAKURA_DOCKER_SUDO_PASSWORD')]) {
-            sh """
-                set +x
-                CLEAN_SUDO_PASSWORD="\$(printf '%s' "\$SAKURA_DOCKER_SUDO_PASSWORD" | tr -d '\\r\\n')"
-                printf '%s\\n' "\$CLEAN_SUDO_PASSWORD" | ssh -tt -o StrictHostKeyChecking=no -o BatchMode=yes -A ${sshUser}@${host} "sudo -k -S -p '' bash -lc '${effectiveUpdateCommandNoSudo}'"
-            """
-        }
+        runSshWithPasswordSudo(host, sshUser, sakuraDockerSudoPasswordCredentialId, remoteScript)
         return
     }
-    sh "ssh -o StrictHostKeyChecking=no -o BatchMode=yes -A ${sshUser}@${host} '${effectiveUpdateCommand}'"
+
+    runSshWithSudo(host, sshUser, remoteScript)
 }
 
 pipeline {
     agent any
-    triggers { cron('TZ=Asia/Tokyo\nH 3 * * *') } // 日本時間で毎日3時に実行（必要に応じて変更）
-    options { timestamps() }
-    // パスフレーズ不要。ssh-agent/キーチェーン/.ssh/configに依存
+
+    triggers {
+        cron('TZ=Asia/Tokyo\nH 3 * * *')
+    }
+
+    options {
+        timestamps()
+    }
+
     stages {
         stage('Update All machosts') {
             steps {
                 script {
+                    def failedHosts = []
+
                     for (host in TARGET_HOSTS) {
                         try {
-                            runUpdateOnHost(host, SSH_USER, UPDATE_COMMAND, UPDATE_COMMAND_NO_SUDO, SAKURA_DOCKER_SUDO_PASSWORD_CREDENTIAL_ID, APT_EXPIRED_METADATA_WORKAROUND_HOSTS)
+                            runUpdateOnHost(
+                                host,
+                                SSH_USER,
+                                SAKURA_DOCKER_SUDO_PASSWORD_CREDENTIAL_ID,
+                                APT_EXPIRED_METADATA_WORKAROUND_HOSTS
+                            )
+                            echo "[OK] ${host}"
                         } catch (Exception e) {
                             echo "[ERROR] ${host}: ${e.getMessage()}"
+                            failedHosts << host
                         }
+                    }
+
+                    if (!failedHosts.isEmpty()) {
+                        error("Failed hosts: ${failedHosts.join(', ')}")
                     }
                 }
             }
         }
     }
+
     post {
-        success { echo 'All hosts updated successfully' }
-        failure { echo 'Some hosts failed to update. Check logs.' }
+        success {
+            echo 'All hosts updated successfully'
+        }
+        failure {
+            echo 'Some hosts failed to update. Check logs.'
+        }
     }
 }
