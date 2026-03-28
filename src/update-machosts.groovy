@@ -1,41 +1,4 @@
-// Jenkins用: machost自身でsshコマンド＋.ssh/configを活用し、複数サーバを自動アップデート
-// サーバリストは下記配列で管理
-// Jenkinsエージェントはmachost自身で動作前提
-
-// サーバリスト（.ssh/configのHost名 or IPアドレス）
-def TARGET_HOSTS = [
-    'machost1',
-    'machost2',
-    // 必要に応じて追加
-]
-
-def UPDATE_COMMAND = 'sudo apt update && sudo apt upgrade -y && sudo apt dist-upgrade -y && sudo apt full-upgrade -y && sudo apt autoremove --purge -y'
-
-pipeline {
-    agent { label 'machost' }
-    triggers { cron('H 3 * * *') } // 毎日3時に実行（必要に応じて変更）
-    options { timestamps() }
-    stages {
-        stage('Update All machosts') {
-            steps {
-                script {
-                    for (host in TARGET_HOSTS) {
-                        try {
-                            echo "==== Updating ${host} ===="
-                            sh "ssh -o BatchMode=yes ${host} '${UPDATE_COMMAND}'"
-                        } catch (Exception e) {
-                            echo "[ERROR] ${host}: ${e.getMessage()}"
-                        }
-                    }
-                }
-            }
-        }
-    }
-    post {
-        success { echo 'All hosts updated successfully' }
-        failure { echo 'Some hosts failed to update. Check logs.' }
-    }
-}// Jenkins用: 複数machostサーバにsshで自動アップデートを定期実行
+// Jenkins用: 複数machostサーバにsshで自動アップデートを定期実行
 // サーバリストは下記配列で管理
 // 秘密鍵・パスフレーズはJenkins Credentials (github-ssh-privatekey, github-ssh-passphrase) を利用
 // agentはmasterまたはssh-agentが使えるノードで
@@ -68,13 +31,13 @@ def TARGET_HOSTS = [
 
 def UPDATE_COMMAND = 'sudo apt update && sudo apt upgrade -y && sudo apt dist-upgrade -y && sudo apt full-upgrade -y && sudo apt autoremove --purge -y'
 
-def SSH_USER = 'your-ssh-user' // サーバ側のユーザー名に合わせて変更
+def SSH_USER = 'honoka' // サーバ側のユーザー名に合わせて変更
 
 def runUpdateOnHost(host) {
     echo "==== Updating ${host} ===="
     // ssh-agent + 秘密鍵でコマンド実行
     sshagent(credentials: ['github-ssh-privatekey']) {
-        sh "ssh -o StrictHostKeyChecking=no -o BatchMode=yes -i $SSH_AUTH_SOCK -A ${SSH_USER}@${host} '${UPDATE_COMMAND}'"
+        sh "ssh -o StrictHostKeyChecking=no -o BatchMode=yes -A ${SSH_USER}@${host} '${UPDATE_COMMAND}'"
     }
 }
 
