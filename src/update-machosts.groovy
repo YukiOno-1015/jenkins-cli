@@ -35,11 +35,11 @@ def APT_EXPIRED_METADATA_WORKAROUND_HOSTS = TARGET_HOSTS
 
 def SSH_USER = 'honoka' // サーバ側のユーザー名に合わせて変更
 
-def runUpdateOnHost(host, sshUser, updateCommand, updateCommandNoSudo, sakuraDockerSudoPasswordCredentialId) {
+def runUpdateOnHost(host, sshUser, updateCommand, updateCommandNoSudo, sakuraDockerSudoPasswordCredentialId, aptExpiredMetadataWorkaroundHosts) {
     echo "==== Updating ${host} ===="
     def effectiveUpdateCommand = updateCommand
     def effectiveUpdateCommandNoSudo = updateCommandNoSudo
-    if (APT_EXPIRED_METADATA_WORKAROUND_HOSTS.contains(host)) {
+    if (aptExpiredMetadataWorkaroundHosts.contains(host)) {
         effectiveUpdateCommand = updateCommand.replace('sudo apt-get update', 'sudo apt-get -o Acquire::Check-Valid-Until=false update')
         effectiveUpdateCommandNoSudo = updateCommandNoSudo.replace('apt-get update', 'apt-get -o Acquire::Check-Valid-Until=false update')
     }
@@ -72,7 +72,7 @@ pipeline {
                 script {
                     for (host in TARGET_HOSTS) {
                         try {
-                            runUpdateOnHost(host, SSH_USER, UPDATE_COMMAND, UPDATE_COMMAND_NO_SUDO, SAKURA_DOCKER_SUDO_PASSWORD_CREDENTIAL_ID)
+                            runUpdateOnHost(host, SSH_USER, UPDATE_COMMAND, UPDATE_COMMAND_NO_SUDO, SAKURA_DOCKER_SUDO_PASSWORD_CREDENTIAL_ID, APT_EXPIRED_METADATA_WORKAROUND_HOSTS)
                         } catch (Exception e) {
                             echo "[ERROR] ${host}: ${e.getMessage()}"
                         }
