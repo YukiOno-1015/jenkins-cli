@@ -1,7 +1,6 @@
 // Jenkins用: 複数machostサーバにsshで自動アップデートを定期実行
 // サーバリストは下記配列で管理
-// 秘密鍵・パスフレーズはJenkins Credentials (github-ssh-privatekey, github-ssh-passphrase) を利用
-// agentはmasterまたはssh-agentが使えるノードで
+// sakura-dockerのsudoパスワードのみJenkins Credentialsを利用
 
 // サーバリスト（ホスト名またはIPアドレス）
 def TARGET_HOSTS = [
@@ -30,11 +29,26 @@ def TARGET_HOSTS = [
 ]
 
 def UPDATE_COMMAND = 'sudo apt update && sudo apt upgrade -y && sudo apt dist-upgrade -y && sudo apt full-upgrade -y && sudo apt autoremove --purge -y'
+def UPDATE_COMMAND_NO_SUDO = 'apt update && apt upgrade -y && apt dist-upgrade -y && apt full-upgrade -y && apt autoremove --purge -y'
+def SAKURA_DOCKER_SUDO_PASSWORD_CREDENTIAL_ID = 'sakura-docker-sudo-password'
 
 def SSH_USER = 'honoka' // サーバ側のユーザー名に合わせて変更
 
 def runUpdateOnHost(host, sshUser, updateCommand) {
     echo "==== Updating ${host} ===="
+    if (host == 'nico' || host == 'umi' || host == 'nozomi' || host == 'maki' || host == 'eri') {
+        sh "ssh -o StrictHostKeyChecking=no -o BatchMode=yes -A root@${host} '${updateCommand}'"
+        return
+    }
+    if (host == 'sakura-docker') {
+        withCredentials([string(credentialsId: SAKURA_DOCKER_SUDO_PASSWORD_CREDENTIAL_ID, variable: 'SAKURA_DOCKER_SUDO_PASSWORD')]) {
+            sh """
+                set +x
+                printf '%s\\n' "\$SAKURA_DOCKER_SUDO_PASSWORD" | ssh -o StrictHostKeyChecking=no -o BatchMode=yes -A ${sshUser}@${host} "sudo -S -p '' bash -lc '${UPDATE_COMMAND_NO_SUDO}'"
+            """
+        }
+        return
+    }
     sh "ssh -o StrictHostKeyChecking=no -o BatchMode=yes -A ${sshUser}@${host} '${updateCommand}'"
 }
 
