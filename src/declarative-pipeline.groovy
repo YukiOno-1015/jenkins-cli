@@ -22,6 +22,7 @@ pipeline {
     options {
         skipDefaultCheckout(true)
         timestamps()
+        disableConcurrentBuilds()
     }
 
     environment {
@@ -36,9 +37,23 @@ pipeline {
         stage('Checkout SCM') {
             steps {
                 script {
-                    retry(3) {
-                        timeout(time: 3, unit: 'MINUTES') {
-                            checkout scm
+                    int maxAttempts = 3
+                    int checkoutTimeoutMinutes = 10
+                    int retryWaitSeconds = 15
+
+                    for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+                        try {
+                            timeout(time: checkoutTimeoutMinutes, unit: 'MINUTES') {
+                                checkout scm
+                            }
+                            break
+                        } catch (Exception e) {
+                            if (attempt == maxAttempts) {
+                                throw e
+                            }
+                            echo "Checkout attempt ${attempt}/${maxAttempts} failed: ${e.getClass().getSimpleName()} - ${e.getMessage()}"
+                            echo "Waiting ${retryWaitSeconds}s before retry..."
+                            sleep time: retryWaitSeconds, unit: 'SECONDS'
                         }
                     }
                 }
