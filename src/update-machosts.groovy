@@ -28,8 +28,8 @@ def TARGET_HOSTS = [
     // 必要に応じて追加
 ]
 
-def UPDATE_COMMAND = 'sudo apt update && sudo apt upgrade -y && sudo apt dist-upgrade -y && sudo apt full-upgrade -y && sudo apt autoremove --purge -y'
-def UPDATE_COMMAND_NO_SUDO = 'apt update && apt upgrade -y && apt dist-upgrade -y && apt full-upgrade -y && apt autoremove --purge -y'
+def UPDATE_COMMAND = 'sudo apt-get clean && sudo rm -rf /var/lib/apt/lists/* && sudo apt-get update && sudo apt-get full-upgrade -y && sudo apt-get autoremove --purge -y'
+def UPDATE_COMMAND_NO_SUDO = 'apt-get clean && rm -rf /var/lib/apt/lists/* && apt-get update && apt-get full-upgrade -y && apt-get autoremove --purge -y'
 def SAKURA_DOCKER_SUDO_PASSWORD_CREDENTIAL_ID = 'sakura-docker-sudo-password'
 
 def SSH_USER = 'honoka' // サーバ側のユーザー名に合わせて変更
