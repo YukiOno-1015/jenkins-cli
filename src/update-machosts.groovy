@@ -83,9 +83,7 @@ ${REMOTE_PREPARE_APT}
 
 ${disableNodeSourceRepo ? '''
 if [ -d /etc/apt/sources.list.d ]; then
-    find /etc/apt/sources.list.d -type f \( -name "*.list" -o -name "*.sources" \) -print0 | \
-        xargs -0 -r sed -i \
-            -e '/nodesource\\.com/s/^/# disabled by jenkins update: /' || true
+    find /etc/apt/sources.list.d -type f | grep -zE '\\.(list|sources)$' | xargs -0 -r sed -i -e '/nodesource\\.com/s/^/# disabled by jenkins update: /' || true
 fi
 ''' : ''}
 
