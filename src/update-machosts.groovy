@@ -116,15 +116,16 @@ def runSshWithPasswordSudo = { host, sshUser, credentialId, remoteScript ->
         sh """
             set +x
             CLEAN_SUDO_PASSWORD="\$(printf '%s' "\$SUDO_PASSWORD" | tr -d '\\r\\n')"
+            PASS_B64="\$(printf '%s' "\$CLEAN_SUDO_PASSWORD" | base64 | tr -d '\\n')"
 
             # 1) まず通常ユーザー権限でリモートに実行スクリプトを配置
             ssh -o StrictHostKeyChecking=no -o BatchMode=yes -A ${sshUser}@${host} 'cat > /tmp/jenkins-apt-update.sh' <<'REMOTE_SCRIPT'
 ${remoteScript}
 REMOTE_SCRIPT
 
-            # 2) パスワードをstdin経由でsudoへ渡して実行し、最後に一時ファイルを削除
-            printf '%s\\n' "\$CLEAN_SUDO_PASSWORD" | ssh -tt -o StrictHostKeyChecking=no -o BatchMode=yes -A ${sshUser}@${host} \
-                "sudo -k -S -p '' bash /tmp/jenkins-apt-update.sh"
+            # 2) リモート側でbase64デコードした値をsudo -Sへ渡して実行し、最後に一時ファイルを削除
+            ssh -tt -o StrictHostKeyChecking=no -o BatchMode=yes -A ${sshUser}@${host} \
+                "printf '%s' '\$PASS_B64' | base64 -d | sudo -k -S -p '' bash /tmp/jenkins-apt-update.sh"
             RC=\$?
             ssh -o StrictHostKeyChecking=no -o BatchMode=yes -A ${sshUser}@${host} 'rm -f /tmp/jenkins-apt-update.sh' || true
             exit \$RC
