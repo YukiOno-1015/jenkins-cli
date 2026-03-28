@@ -112,11 +112,11 @@ ${remoteScript}
 REMOTE_SCRIPT
 
             # 2) パスワードをstdin経由でsudoへ渡して実行し、最後に一時ファイルを削除
-                        printf '%s\\n' "\$CLEAN_SUDO_PASSWORD" | ssh -tt -o StrictHostKeyChecking=no -o BatchMode=yes -A ${sshUser}@${host} \
-                            "sudo -k -S -p '' bash /tmp/jenkins-apt-update.sh"
-                        RC=\$?
-                        ssh -o StrictHostKeyChecking=no -o BatchMode=yes -A ${sshUser}@${host} 'rm -f /tmp/jenkins-apt-update.sh' || true
-                        exit \$RC
+            printf '%s\\n' "\$CLEAN_SUDO_PASSWORD" | ssh -tt -o StrictHostKeyChecking=no -o BatchMode=yes -A ${sshUser}@${host} \
+                "sudo -k -S -p '' bash /tmp/jenkins-apt-update.sh"
+            RC=\$?
+            ssh -o StrictHostKeyChecking=no -o BatchMode=yes -A ${sshUser}@${host} 'rm -f /tmp/jenkins-apt-update.sh' || true
+            exit \$RC
         """
     }
 }
