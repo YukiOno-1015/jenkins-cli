@@ -35,10 +35,7 @@ def SSH_USER = 'honoka' // サーバ側のユーザー名に合わせて変更
 
 def runUpdateOnHost(host) {
     echo "==== Updating ${host} ===="
-    // ssh-agent + 秘密鍵でコマンド実行
-    sshagent(credentials: ['github-ssh-privatekey']) {
-        sh "ssh -o StrictHostKeyChecking=no -o BatchMode=yes -A ${SSH_USER}@${host} '${UPDATE_COMMAND}'"
-    }
+    sh "ssh -o StrictHostKeyChecking=no -o BatchMode=yes -A ${SSH_USER}@${host} '${UPDATE_COMMAND}'"
 }
 
 pipeline {
