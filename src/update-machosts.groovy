@@ -34,17 +34,17 @@ def SAKURA_DOCKER_SUDO_PASSWORD_CREDENTIAL_ID = 'sakura-docker-sudo-password'
 
 def SSH_USER = 'honoka' // サーバ側のユーザー名に合わせて変更
 
-def runUpdateOnHost(host, sshUser, updateCommand) {
+def runUpdateOnHost(host, sshUser, updateCommand, updateCommandNoSudo, sakuraDockerSudoPasswordCredentialId) {
     echo "==== Updating ${host} ===="
     if (host == 'nico' || host == 'umi' || host == 'nozomi' || host == 'maki' || host == 'eri') {
         sh "ssh -o StrictHostKeyChecking=no -o BatchMode=yes -A root@${host} '${updateCommand}'"
         return
     }
     if (host == 'sakura-docker') {
-        withCredentials([string(credentialsId: SAKURA_DOCKER_SUDO_PASSWORD_CREDENTIAL_ID, variable: 'SAKURA_DOCKER_SUDO_PASSWORD')]) {
+        withCredentials([string(credentialsId: sakuraDockerSudoPasswordCredentialId, variable: 'SAKURA_DOCKER_SUDO_PASSWORD')]) {
             sh """
                 set +x
-                printf '%s\\n' "\$SAKURA_DOCKER_SUDO_PASSWORD" | ssh -o StrictHostKeyChecking=no -o BatchMode=yes -A ${sshUser}@${host} "sudo -S -p '' bash -lc '${UPDATE_COMMAND_NO_SUDO}'"
+                printf '%s\\n' "\$SAKURA_DOCKER_SUDO_PASSWORD" | ssh -o StrictHostKeyChecking=no -o BatchMode=yes -A ${sshUser}@${host} "sudo -S -p '' bash -lc '${updateCommandNoSudo}'"
             """
         }
         return
@@ -63,7 +63,7 @@ pipeline {
                 script {
                     for (host in TARGET_HOSTS) {
                         try {
-                            runUpdateOnHost(host, SSH_USER, UPDATE_COMMAND)
+                            runUpdateOnHost(host, SSH_USER, UPDATE_COMMAND, UPDATE_COMMAND_NO_SUDO, SAKURA_DOCKER_SUDO_PASSWORD_CREDENTIAL_ID)
                         } catch (Exception e) {
                             echo "[ERROR] ${host}: ${e.getMessage()}"
                         }
