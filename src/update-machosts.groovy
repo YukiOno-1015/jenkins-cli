@@ -31,25 +31,34 @@ def TARGET_HOSTS = [
 def UPDATE_COMMAND = 'sudo apt-get clean && sudo rm -rf /var/lib/apt/lists/* && sudo apt-get update && sudo apt-get full-upgrade -y && sudo apt-get autoremove --purge -y'
 def UPDATE_COMMAND_NO_SUDO = 'apt-get clean && rm -rf /var/lib/apt/lists/* && apt-get update && apt-get full-upgrade -y && apt-get autoremove --purge -y'
 def SAKURA_DOCKER_SUDO_PASSWORD_CREDENTIAL_ID = 'sakura-docker-sudo-password'
+def APT_EXPIRED_METADATA_WORKAROUND_HOSTS = TARGET_HOSTS
 
 def SSH_USER = 'honoka' // サーバ側のユーザー名に合わせて変更
 
 def runUpdateOnHost(host, sshUser, updateCommand, updateCommandNoSudo, sakuraDockerSudoPasswordCredentialId) {
     echo "==== Updating ${host} ===="
+    def effectiveUpdateCommand = updateCommand
+    def effectiveUpdateCommandNoSudo = updateCommandNoSudo
+    if (APT_EXPIRED_METADATA_WORKAROUND_HOSTS.contains(host)) {
+        effectiveUpdateCommand = updateCommand.replace('sudo apt-get update', 'sudo apt-get -o Acquire::Check-Valid-Until=false update')
+        effectiveUpdateCommandNoSudo = updateCommandNoSudo.replace('apt-get update', 'apt-get -o Acquire::Check-Valid-Until=false update')
+    }
+
     if (host == 'nico' || host == 'umi' || host == 'nozomi' || host == 'maki' || host == 'eri') {
-        sh "ssh -o StrictHostKeyChecking=no -o BatchMode=yes -A root@${host} '${updateCommand}'"
+        sh "ssh -o StrictHostKeyChecking=no -o BatchMode=yes -A root@${host} '${effectiveUpdateCommand}'"
         return
     }
     if (host == 'sakura-docker') {
         withCredentials([string(credentialsId: sakuraDockerSudoPasswordCredentialId, variable: 'SAKURA_DOCKER_SUDO_PASSWORD')]) {
             sh """
                 set +x
-                printf '%s\\n' "\$SAKURA_DOCKER_SUDO_PASSWORD" | ssh -o StrictHostKeyChecking=no -o BatchMode=yes -A ${sshUser}@${host} "sudo -S -p '' bash -lc '${updateCommandNoSudo}'"
+                CLEAN_SUDO_PASSWORD="\$(printf '%s' "\$SAKURA_DOCKER_SUDO_PASSWORD" | tr -d '\\r\\n')"
+                printf '%s\\n' "\$CLEAN_SUDO_PASSWORD" | ssh -tt -o StrictHostKeyChecking=no -o BatchMode=yes -A ${sshUser}@${host} "sudo -k -S -p '' bash -lc '${effectiveUpdateCommandNoSudo}'"
             """
         }
         return
     }
-    sh "ssh -o StrictHostKeyChecking=no -o BatchMode=yes -A ${sshUser}@${host} '${updateCommand}'"
+    sh "ssh -o StrictHostKeyChecking=no -o BatchMode=yes -A ${sshUser}@${host} '${effectiveUpdateCommand}'"
 }
 
 pipeline {
