@@ -84,19 +84,19 @@ apt-get autoremove --purge -y
 """.trim()
 }
 
-def shellSingleQuote = { String s ->
-    return s.replace("'", "'\"'\"'")
-}
-
 def runSshAsRoot = { host, remoteScript ->
     sh """
-        ssh -o StrictHostKeyChecking=no -o BatchMode=yes -A root@${host} 'bash -lc '${"'" + shellSingleQuote(remoteScript) + "'"}''
+        ssh -o StrictHostKeyChecking=no -o BatchMode=yes -A root@${host} 'bash -s' <<'REMOTE_SCRIPT'
+${remoteScript}
+REMOTE_SCRIPT
     """
 }
 
 def runSshWithSudo = { host, sshUser, remoteScript ->
     sh """
-        ssh -o StrictHostKeyChecking=no -o BatchMode=yes -A ${sshUser}@${host} 'sudo bash -lc '${"'" + shellSingleQuote(remoteScript) + "'"}''
+        ssh -o StrictHostKeyChecking=no -o BatchMode=yes -A ${sshUser}@${host} 'sudo -n bash -s' <<'REMOTE_SCRIPT'
+${remoteScript}
+REMOTE_SCRIPT
     """
 }
 
@@ -105,9 +105,10 @@ def runSshWithPasswordSudo = { host, sshUser, credentialId, remoteScript ->
         sh """
             set +x
             CLEAN_SUDO_PASSWORD="\$(printf '%s' "\$SUDO_PASSWORD" | tr -d '\\r\\n')"
-            printf '%s\\n' "\$CLEAN_SUDO_PASSWORD" | \
-              ssh -tt -o StrictHostKeyChecking=no -o BatchMode=yes -A ${sshUser}@${host} \
-              "sudo -k -S -p '' bash -lc '${shellSingleQuote(remoteScript)}'"
+            ssh -tt -o StrictHostKeyChecking=no -o BatchMode=yes -A ${sshUser}@${host} \
+              "printf '%s\\n' \"\$CLEAN_SUDO_PASSWORD\" | sudo -k -S -p '' -v >/dev/null && sudo -n bash -s" <<'REMOTE_SCRIPT'
+${remoteScript}
+REMOTE_SCRIPT
         """
     }
 }
