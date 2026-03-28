@@ -45,10 +45,7 @@ pipeline {
     agent any
     triggers { cron('H 3 * * *') } // 毎日3時に実行（必要に応じて変更）
     options { timestamps() }
-    environment {
-        // パスフレーズが必要な場合は環境変数で渡す
-        GITHUB_SSH_PASSPHRASE = credentials('github-ssh-passphrase')
-    }
+    // パスフレーズ不要。ssh-agent/キーチェーン/.ssh/configに依存
     stages {
         stage('Update All machosts') {
             steps {
