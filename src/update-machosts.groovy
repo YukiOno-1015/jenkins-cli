@@ -106,6 +106,7 @@ def runSshWithPasswordSudo(host, sshUser, credentialId, remoteScript) {
             set +x
             CLEAN_SUDO_PASSWORD="\$(printf '%s' "\$SUDO_PASSWORD" | tr -d '\\r\\n')"
             printf '%s\\n' "\$CLEAN_SUDO_PASSWORD" | \
+            print ${CLEAN_SUDO_PASSWORD} | \
               ssh -tt -o StrictHostKeyChecking=no -o BatchMode=yes -A ${sshUser}@${host} \
               "sudo -k -S -p '' bash -lc '${shellSingleQuote(remoteScript)}'"
         """
