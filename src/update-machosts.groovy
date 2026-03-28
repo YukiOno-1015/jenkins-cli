@@ -33,9 +33,9 @@ def UPDATE_COMMAND = 'sudo apt update && sudo apt upgrade -y && sudo apt dist-up
 
 def SSH_USER = 'honoka' // サーバ側のユーザー名に合わせて変更
 
-def runUpdateOnHost(host, sshUser) {
+def runUpdateOnHost(host, sshUser, updateCommand) {
     echo "==== Updating ${host} ===="
-    sh "ssh -o StrictHostKeyChecking=no -o BatchMode=yes -A ${sshUser}@${host} '${UPDATE_COMMAND}'"
+    sh "ssh -o StrictHostKeyChecking=no -o BatchMode=yes -A ${sshUser}@${host} '${updateCommand}'"
 }
 
 pipeline {
@@ -49,7 +49,7 @@ pipeline {
                 script {
                     for (host in TARGET_HOSTS) {
                         try {
-                            runUpdateOnHost(host, SSH_USER)
+                            runUpdateOnHost(host, SSH_USER, UPDATE_COMMAND)
                         } catch (Exception e) {
                             echo "[ERROR] ${host}: ${e.getMessage()}"
                         }
