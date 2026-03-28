@@ -73,7 +73,8 @@ jenkins-cli/
 ├── docs/                                   # ドキュメント
 │   ├── UNIFIED_WEBHOOK_SETUP.md            # 統合Webhookパイプラインのセットアップガイド
 │   ├── REPOSITORY_CONFIG_GUIDE.md          # リポジトリ設定管理ガイド
-│   └── AUTHENTICATION_GUIDE.md              # 認証設定ガイド
+│   ├── AUTHENTICATION_GUIDE.md              # 認証設定ガイド
+│   └── templates/local.Jenkins.Agent.launchd.plist # machost用launchdテンプレート
 │
 ├── src/                                     # パイプライン定義
 │   ├── unifiedWebhookPipeline.groovy       # 統合Webhookパイプライン（直接実装版）

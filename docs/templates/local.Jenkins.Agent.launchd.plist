@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <key>Label</key>
+    <string>local.Jenkins.Agent.launchd</string>
+
+    <key>ProgramArguments</key>
+    <array>
+      <string>/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home/bin/java</string>
+      <string>-jar</string>
+      <string>/Users/your-user/jenkins-agent/agent.jar</string>
+
+      <string>-url</string>
+      <string>https://your-jenkins.example.com/</string>
+
+      <string>-secret</string>
+      <string>@/Users/your-user/jenkins-agent/secret.txt</string>
+
+      <string>-name</string>
+      <string>machost</string>
+
+      <string>-webSocket</string>
+
+      <string>-workDir</string>
+      <string>/Users/your-user/jenkins</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/your-user/jenkins</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+      <key>PATH</key>
+      <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+      <key>JAVA_HOME</key>
+      <string>/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home</string>
+    </dict>
+
+    <!-- macOS再起動後に自動起動 -->
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!-- 切断/異常終了時に再起動（瞬断対策） -->
+    <key>KeepAlive</key>
+    <dict>
+      <key>Crashed</key>
+      <true/>
+      <key>SuccessfulExit</key>
+      <false/>
+      <key>NetworkState</key>
+      <true/>
+    </dict>
+
+    <!-- リトライが過密にならないように間隔を持たせる -->
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+
+    <!-- Loginユーザーセッションで起動（LaunchAgent想定） -->
+    <key>LimitLoadToSessionType</key>
+    <string>Aqua</string>
+
+    <key>StandardOutPath</key>
+    <string>/Users/your-user/Library/Logs/jenkins.agent.stdout</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/your-user/Library/Logs/jenkins.agent.stderr</string>
+  </dict>
+</plist>
