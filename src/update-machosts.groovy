@@ -65,7 +65,7 @@ if [ -d /etc/apt/sources.list.d ]; then
 fi
 '''
 
-def buildUpdateCommand(boolean useValidUntilWorkaround = false) {
+def buildUpdateCommand = { boolean useValidUntilWorkaround = false ->
     def updatePart = useValidUntilWorkaround
         ? 'apt-get -o Acquire::Check-Valid-Until=false update'
         : 'apt-get update'
@@ -84,36 +84,35 @@ apt-get autoremove --purge -y
 """.trim()
 }
 
-def shellSingleQuote(String s) {
+def shellSingleQuote = { String s ->
     return s.replace("'", "'\"'\"'")
 }
 
-def runSshAsRoot(host, remoteScript) {
+def runSshAsRoot = { host, remoteScript ->
     sh """
         ssh -o StrictHostKeyChecking=no -o BatchMode=yes -A root@${host} 'bash -lc '${"'" + shellSingleQuote(remoteScript) + "'"}''
     """
 }
 
-def runSshWithSudo(host, sshUser, remoteScript) {
+def runSshWithSudo = { host, sshUser, remoteScript ->
     sh """
         ssh -o StrictHostKeyChecking=no -o BatchMode=yes -A ${sshUser}@${host} 'sudo bash -lc '${"'" + shellSingleQuote(remoteScript) + "'"}''
     """
 }
 
-def runSshWithPasswordSudo(host, sshUser, credentialId, remoteScript) {
+def runSshWithPasswordSudo = { host, sshUser, credentialId, remoteScript ->
     withCredentials([string(credentialsId: credentialId, variable: 'SUDO_PASSWORD')]) {
         sh """
             set +x
             CLEAN_SUDO_PASSWORD="\$(printf '%s' "\$SUDO_PASSWORD" | tr -d '\\r\\n')"
             printf '%s\\n' "\$CLEAN_SUDO_PASSWORD" | \
-            print ${CLEAN_SUDO_PASSWORD} | \
               ssh -tt -o StrictHostKeyChecking=no -o BatchMode=yes -A ${sshUser}@${host} \
               "sudo -k -S -p '' bash -lc '${shellSingleQuote(remoteScript)}'"
         """
     }
 }
 
-def runUpdateOnHost(host, sshUser, sakuraDockerSudoPasswordCredentialId, aptExpiredMetadataWorkaroundHosts) {
+def runUpdateOnHost = { host, sshUser, sakuraDockerSudoPasswordCredentialId, aptExpiredMetadataWorkaroundHosts ->
     echo "==== Updating ${host} ===="
     def useWorkaround = aptExpiredMetadataWorkaroundHosts.contains(host)
     def remoteScript = buildUpdateCommand(useWorkaround)
