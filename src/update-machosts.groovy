@@ -105,10 +105,15 @@ def runSshWithPasswordSudo = { host, sshUser, credentialId, remoteScript ->
         sh """
             set +x
             CLEAN_SUDO_PASSWORD="\$(printf '%s' "\$SUDO_PASSWORD" | tr -d '\\r\\n')"
-            ssh -tt -o StrictHostKeyChecking=no -o BatchMode=yes -A ${sshUser}@${host} \
-              "printf '%s\\n' \"\$CLEAN_SUDO_PASSWORD\" | sudo -k -S -p '' -v >/dev/null && sudo -n bash -s" <<'REMOTE_SCRIPT'
+
+            # 1) まず通常ユーザー権限でリモートに実行スクリプトを配置
+            ssh -o StrictHostKeyChecking=no -o BatchMode=yes -A ${sshUser}@${host} 'cat > /tmp/jenkins-apt-update.sh' <<'REMOTE_SCRIPT'
 ${remoteScript}
 REMOTE_SCRIPT
+
+            # 2) パスワードをstdin経由でsudoへ渡して実行し、最後に一時ファイルを削除
+            ssh -tt -o StrictHostKeyChecking=no -o BatchMode=yes -A ${sshUser}@${host} \
+              "printf '%s\\n' \"\$CLEAN_SUDO_PASSWORD\" | sudo -k -S -p '' bash /tmp/jenkins-apt-update.sh; RC=\$?; rm -f /tmp/jenkins-apt-update.sh; exit \$RC"
         """
     }
 }
