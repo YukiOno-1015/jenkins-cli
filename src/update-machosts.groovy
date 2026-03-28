@@ -42,6 +42,11 @@ def ROOT_LOGIN_HOSTS = [
 def APT_EXPIRED_METADATA_WORKAROUND_HOSTS = [
 ]
 
+// NodeSourceの署名エラーを回避するため、対象ホストではNodeSourceエントリを無効化
+def NODESOURCE_REPO_DISABLE_HOSTS = [
+    'eri'
+]
+
 // Debian ミラーの補正 + apt 更新
 def REMOTE_PREPARE_APT = '''
 set -euo pipefail
@@ -65,7 +70,7 @@ if [ -d /etc/apt/sources.list.d ]; then
 fi
 '''
 
-def buildUpdateCommand = { boolean useValidUntilWorkaround = false ->
+def buildUpdateCommand = { boolean useValidUntilWorkaround = false, boolean disableNodeSourceRepo = false ->
     def updatePart = useValidUntilWorkaround
         ? 'apt-get -o Acquire::Check-Valid-Until=false update'
         : 'apt-get update'
@@ -75,6 +80,14 @@ set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 
 ${REMOTE_PREPARE_APT}
+
+${disableNodeSourceRepo ? '''
+if [ -d /etc/apt/sources.list.d ]; then
+    find /etc/apt/sources.list.d -type f \( -name "*.list" -o -name "*.sources" \) -print0 | \
+        xargs -0 -r sed -i \
+            -e '/nodesource\\.com/s/^/# disabled by jenkins update: /' || true
+fi
+''' : ''}
 
 apt-get clean
 rm -rf /var/lib/apt/lists/*
@@ -124,7 +137,8 @@ REMOTE_SCRIPT
 def runUpdateOnHost = { host, sshUser, sakuraDockerSudoPasswordCredentialId, aptExpiredMetadataWorkaroundHosts ->
     echo "==== Updating ${host} ===="
     def useWorkaround = aptExpiredMetadataWorkaroundHosts.contains(host)
-    def remoteScript = buildUpdateCommand(useWorkaround)
+    def disableNodeSourceRepo = NODESOURCE_REPO_DISABLE_HOSTS.contains(host)
+    def remoteScript = buildUpdateCommand(useWorkaround, disableNodeSourceRepo)
 
     if (ROOT_LOGIN_HOSTS.contains(host)) {
         runSshAsRoot(host, remoteScript)
