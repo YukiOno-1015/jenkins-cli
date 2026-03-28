@@ -123,9 +123,11 @@ def runSshWithPasswordSudo = { host, sshUser, credentialId, remoteScript ->
 ${remoteScript}
 REMOTE_SCRIPT
 
-            # 2) リモート側でbase64デコードした値をsudo -Sへ渡して実行し、最後に一時ファイルを削除
-            ssh -tt -o StrictHostKeyChecking=no -o BatchMode=yes -A ${sshUser}@${host} \
-                "printf '%s' '\$PASS_B64' | base64 -d | sudo -k -S -p '' bash /tmp/jenkins-apt-update.sh"
+            # 2) base64化したパスワードを引数としてリモートへ渡し、sudo -Sへ供給して実行
+            ssh -tt -o StrictHostKeyChecking=no -o BatchMode=yes -A ${sshUser}@${host} 'bash -s' "\$PASS_B64" <<'REMOTE_SUDO'
+PASS_B64="\$1"
+printf '%s' "\$PASS_B64" | base64 -d | sudo -k -S -p '' bash /tmp/jenkins-apt-update.sh
+REMOTE_SUDO
             RC=\$?
             ssh -o StrictHostKeyChecking=no -o BatchMode=yes -A ${sshUser}@${host} 'rm -f /tmp/jenkins-apt-update.sh' || true
             exit \$RC
