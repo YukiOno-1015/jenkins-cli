@@ -1,5 +1,4 @@
 // Jenkins用: 複数machostサーバにsshで自動アップデートを定期実行
-// sakura-docker のみ sudo パスワードを Jenkins Credentials から利用
 
 def TARGET_HOSTS = [
     'sakura-docker',
@@ -26,7 +25,6 @@ def TARGET_HOSTS = [
 ]
 
 def SSH_USER = 'honoka'
-def SAKURA_DOCKER_SUDO_PASSWORD_CREDENTIAL_ID = 'sakura-docker-sudo-password'
 
 // root で直接入るホスト
 def ROOT_LOGIN_HOSTS = [
@@ -115,32 +113,7 @@ REMOTE_SCRIPT
     """
 }
 
-def runSshWithPasswordSudo = { host, sshUser, credentialId, remoteScript ->
-    withCredentials([string(credentialsId: credentialId, variable: 'SUDO_PASSWORD')]) {
-        sh """
-            set +x
-            CLEAN_SUDO_PASSWORD="\$(printf '%s' "\$SUDO_PASSWORD" | tr -d '\\r\\n')"
-            PASS_B64="\$(printf '%s' "\$CLEAN_SUDO_PASSWORD" | base64 | tr -d '\\n')"
-
-            # 1) まず通常ユーザー権限でリモートに実行スクリプトを配置
-            ssh -o StrictHostKeyChecking=no -o BatchMode=yes -A ${sshUser}@${host} 'cat > /tmp/jenkins-apt-update.sh' <<'REMOTE_SCRIPT'
-${remoteScript}
-REMOTE_SCRIPT
-
-            # 2) base64化したパスワードを引数としてリモートへ渡し、改行付きでsudo -Sへ供給して実行
-            ssh -o StrictHostKeyChecking=no -o BatchMode=yes -A ${sshUser}@${host} 'bash -s' "\$PASS_B64" <<'REMOTE_SUDO'
-PASS_B64="\$1"
-PASS_PLAIN="\$(printf '%s' "\$PASS_B64" | base64 -d)"
-printf '%s\n' "\$PASS_PLAIN" | sudo -k -S -p '' bash /tmp/jenkins-apt-update.sh
-REMOTE_SUDO
-            RC=\$?
-            ssh -o StrictHostKeyChecking=no -o BatchMode=yes -A ${sshUser}@${host} 'rm -f /tmp/jenkins-apt-update.sh' || true
-            exit \$RC
-        """
-    }
-}
-
-def runUpdateOnHost = { host, sshUser, sakuraDockerSudoPasswordCredentialId, aptExpiredMetadataWorkaroundHosts ->
+def runUpdateOnHost = { host, sshUser, aptExpiredMetadataWorkaroundHosts ->
     echo "==== Updating ${host} ===="
     def useWorkaround = aptExpiredMetadataWorkaroundHosts.contains(host)
     def disableNodeSourceRepo = NODESOURCE_REPO_DISABLE_HOSTS.contains(host)
@@ -148,11 +121,6 @@ def runUpdateOnHost = { host, sshUser, sakuraDockerSudoPasswordCredentialId, apt
 
     if (ROOT_LOGIN_HOSTS.contains(host)) {
         runSshAsRoot(host, remoteScript)
-        return
-    }
-
-    if (host == 'sakura-docker') {
-        runSshWithPasswordSudo(host, sshUser, sakuraDockerSudoPasswordCredentialId, remoteScript)
         return
     }
 
@@ -181,7 +149,6 @@ pipeline {
                             runUpdateOnHost(
                                 host,
                                 SSH_USER,
-                                SAKURA_DOCKER_SUDO_PASSWORD_CREDENTIAL_ID,
                                 APT_EXPIRED_METADATA_WORKAROUND_HOSTS
                             )
                             echo "[OK] ${host}"
