@@ -63,6 +63,17 @@ Jenkins 用の共有ライブラリとパイプライン定義を提供するプ
 - **authenticatedCheckout**: 認証情報を自動解決してチェックアウト
 - **repositoryConfig**: リポジトリ設定の一元管理
 
+### 6. 🖥️ Proxmox ホスト監視/更新パイプライン
+
+- **update-proxmox-hosts**: Proxmox ホスト専用の監視/更新パイプライン
+- デフォルトでは更新候補の検知のみを実施
+- `TEST_NOTIFICATIONS_ONLY=true` の場合は通知テストのみを実施
+- `APPLY_UPDATES=true` の場合のみ `full-upgrade` を実行
+- クラスタ構成時は quorum を確認してから更新を実行
+- 検知結果は `proxmox-host-results.json` としてアーティファクト保存
+- `slack-webhook-url` または `discord-webhook-url` を Jenkins Credentials の Secret text として登録すると通知を送信
+- 通知には Jenkins ジョブ URL と結果JSONへのリンクを含める
+
 ## プロジェクト構成
 
 ```
@@ -80,7 +91,9 @@ jenkins-cli/
 │   ├── unifiedWebhookPipeline.groovy       # 統合Webhookパイプライン（直接実装版）
 │   ├── portalAppPipeline.groovy            # Portal App ビルドパイプライン（簡略化済み）
 │   ├── portalAppBackEndPipeline.groovy     # Portal App Backend ビルドパイプライン（簡略化済み）
-│   └── declarative-pipeline.groovy          # Cloudflare allowlist 更新パイプライン
+│   ├── declarative-pipeline.groovy         # Cloudflare allowlist 更新パイプライン
+│   ├── update-machosts.groovy              # Debian/Ubuntu 系 machost 更新パイプライン
+│   └── update-proxmox-hosts.groovy         # Proxmox ホスト監視/更新パイプライン
 │
 ├── vars/                                    # Jenkins Shared Library 関数
 │   ├── core/                                # 🔧 コア機能
