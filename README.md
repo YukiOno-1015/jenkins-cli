@@ -111,9 +111,6 @@ jenkins-cli/
 │   │
 │   └── kubernetes/                          # ☸️ Kubernetes
 │       └── k8sPodYaml.groovy               # Kubernetes Pod定義生成（設定自動取得対応）
-│
-└── scripts/
-    └── cf_update_jenkins_allowlist.sh      # Cloudflare IP allowlist更新スクリプト
 ```
 
 ### 重要なファイル
@@ -563,20 +560,14 @@ def config = repositoryConfig.getCurrent()
 3. パイプラインジョブを作成し、`src/declarative-pipeline.groovy`を指定
 4. ビルドトリガーは自動設定されています（10 分ごと）
 
-**環境変数:**
+**主な設定値（`src/declarative-pipeline.groovy` 内）:**
 
-- `HOSTNAME`: 保護対象のホスト名（デフォルト: `jenkins-svc.sk4869.info`）
-- `RULE_DESC`: Cloudflare ルールの説明（デフォルト: `allowlist-jenkins-svc`）
+- `RULE_DEFS`: 更新対象ルール（description と hostname の組）
 - `IP_SOURCE_URL`: IP 取得元 URL（デフォルト: `https://ifconfig.me`）
-- `SCRIPT_PATH`: スクリプトパス（`${WORKSPACE}/scripts/cf_update_jenkins_allowlist.sh`）
+- `STATE_DIR` / `STATE_FILE`: 前回IPを保持するローカル状態ファイル
+- `CF_API_BASE`: Cloudflare API のベース URL
 
-**改善点 (2026-01-12):**
-
-- ✅ ハードコードされた絶対パス（`/Volumes/HDD/...`）を削除
-- ✅ `${WORKSPACE}` を使用した環境非依存化
-- ✅ スクリプト存在確認の追加
-- ✅ エラーメッセージの改善
-- ✅ success ポストアクションの追加
+※ `scripts/cf_update_jenkins_allowlist.sh` は廃止され、現在は `src/declarative-pipeline.groovy` に実装を統合しています。
 
 ## 詳細ドキュメント
 
