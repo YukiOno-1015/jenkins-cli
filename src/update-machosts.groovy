@@ -31,6 +31,7 @@ def TARGET_HOSTS = [
 ]
 
 def SSH_USER = 'honoka'
+def MACOS_SSH_USER = 'yukiono'
 
 // macOS ホストは brew update/upgrade で更新する
 def MACOS_HOSTS = [
@@ -156,11 +157,11 @@ REMOTE_SCRIPT
     """
 }
 
-def runUpdateOnHost = { host, sshUser, aptExpiredMetadataWorkaroundHosts ->
+def runUpdateOnHost = { host, sshUser, macOsSshUser, aptExpiredMetadataWorkaroundHosts ->
     echo "==== Updating ${host} ===="
 
     if (MACOS_HOSTS.contains(host)) {
-        runSshAsUser(host, sshUser, buildMacOsUpdateCommand())
+        runSshAsUser(host, macOsSshUser, buildMacOsUpdateCommand())
         return
     }
 
@@ -198,6 +199,7 @@ pipeline {
                             runUpdateOnHost(
                                 host,
                                 SSH_USER,
+                                MACOS_SSH_USER,
                                 APT_EXPIRED_METADATA_WORKAROUND_HOSTS
                             )
                             echo "[OK] ${host}"
