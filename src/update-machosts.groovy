@@ -26,9 +26,12 @@ def TARGET_HOSTS = [
     // NFSサーバ
     'nfs01',
     'nfs02',
+    // macOSサーバ
     'machost',
     'macmini'
 ]
+
+def TARGET_HOST_CHOICES = (['ALL'] + TARGET_HOSTS).join('\n')
 
 def SSH_USER = 'honoka'
 def MACOS_SSH_USER = 'yukiono'
@@ -51,11 +54,6 @@ def ROOT_LOGIN_HOSTS = [
 // どうしても Valid-Until 回避が必要なホストだけ入れる
 // 今回の 404 は mirror mismatch なので、まずは空推奨
 def APT_EXPIRED_METADATA_WORKAROUND_HOSTS = [
-]
-
-// NodeSourceの署名エラーを回避するため、対象ホストではNodeSourceエントリを無効化
-def NODESOURCE_REPO_DISABLE_HOSTS = [
-    'eri'
 ]
 
 // Debian ミラーの補正 + apt 更新
@@ -81,7 +79,7 @@ if [ -d /etc/apt/sources.list.d ]; then
 fi
 '''
 
-def buildUpdateCommand = { boolean useValidUntilWorkaround = false, boolean disableNodeSourceRepo = false ->
+def buildUpdateCommand = { boolean useValidUntilWorkaround = false ->
     def updatePart = useValidUntilWorkaround
         ? 'apt-get -o Acquire::Check-Valid-Until=false update'
         : 'apt-get update'
@@ -92,19 +90,6 @@ export DEBIAN_FRONTEND=noninteractive
 
 ${REMOTE_PREPARE_APT}
 
-${disableNodeSourceRepo ? '''
-if [ -f /etc/apt/sources.list ]; then
-    sed -i -e '/nodesource[.]com/s/^/# disabled by jenkins update: /' /etc/apt/sources.list || true
-fi
-
-if [ -d /etc/apt/sources.list.d ]; then
-    for f in /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
-        [ -e "$f" ] || continue
-        sed -i -e '/nodesource[.]com/s/^/# disabled by jenkins update: /' "$f" || true
-    done
-fi
-''' : ''}
-
 apt-get clean
 rm -rf /var/lib/apt/lists/*
 ${updatePart}
@@ -114,7 +99,7 @@ apt-get autoremove --purge -y
 }
 
 def buildMacOsUpdateCommand = {
-        return '''
+    return '''
 set -euo pipefail
 
 if [ -x /opt/homebrew/bin/brew ]; then
@@ -166,8 +151,7 @@ def runUpdateOnHost = { host, sshUser, macOsSshUser, aptExpiredMetadataWorkaroun
     }
 
     def useWorkaround = aptExpiredMetadataWorkaroundHosts.contains(host)
-    def disableNodeSourceRepo = NODESOURCE_REPO_DISABLE_HOSTS.contains(host)
-    def remoteScript = buildUpdateCommand(useWorkaround, disableNodeSourceRepo)
+    def remoteScript = buildUpdateCommand(useWorkaround)
 
     if (ROOT_LOGIN_HOSTS.contains(host)) {
         runSshAsRoot(host, remoteScript)
@@ -184,6 +168,10 @@ pipeline {
         cron('TZ=Asia/Tokyo\nH 3 * * *')
     }
 
+    parameters {
+        choice(name: 'TARGET_HOST', choices: TARGET_HOST_CHOICES, description: '更新対象ホストを選択（ALL で全ホスト実行）')
+    }
+
     options {
         timestamps()
     }
@@ -193,8 +181,11 @@ pipeline {
             steps {
                 script {
                     def failedHosts = []
+                    def targetHosts = params.TARGET_HOST == 'ALL' ? TARGET_HOSTS : [params.TARGET_HOST]
 
-                    for (host in TARGET_HOSTS) {
+                    echo "Target hosts: ${targetHosts.join(', ')}"
+
+                    for (host in targetHosts) {
                         try {
                             runUpdateOnHost(
                                 host,
