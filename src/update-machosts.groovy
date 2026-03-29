@@ -85,7 +85,10 @@ if [ -f /etc/apt/sources.list ]; then
 fi
 
 if [ -d /etc/apt/sources.list.d ]; then
-    find /etc/apt/sources.list.d -type f | grep -zE '\\.(list|sources)$' | xargs -0 -r sed -i -e '/nodesource\\.com/s/^/# disabled by jenkins update: /' || true
+    for f in /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
+        [ -e "$f" ] || continue
+        sed -i -e '/nodesource[.]com/s/^/# disabled by jenkins update: /' "$f" || true
+    done
 fi
 ''' : ''}
 
