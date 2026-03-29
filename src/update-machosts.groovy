@@ -1,14 +1,17 @@
 // Jenkins用: 複数machostサーバにsshで自動アップデートを定期実行
 
 def TARGET_HOSTS = [
+    // さくらサーバ
     'sakura-docker',
     'nico',
     'umi',
     'nozomi',
     'maki',
     'eri',
+    // トンネルサーバ
     'tunnel01',
     'tunnel02',
+    // Kubernetes クラスタ
     'k8s-ctrl01',
     'k8s-ctrl02',
     'k8s-ctrl03',
@@ -20,6 +23,7 @@ def TARGET_HOSTS = [
     'k8s-node04',
     'k8s-node05',
     'k8s-node06',
+    // NFSサーバ
     'nfs01',
     'nfs02',
 ]
