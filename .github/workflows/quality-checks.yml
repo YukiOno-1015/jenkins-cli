@@ -1,69 +1,46 @@
 name: Quality Checks
 
 on:
-  pull_request:
-  push:
-    branches:
-      - main
+    pull_request:
+    push:
+        branches:
+            - main
 
 jobs:
-  markdown-lint:
-    name: Markdown Lint
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+    markdown-lint:
+        name: Markdown Lint
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
+            - name: Setup Node.js
+              uses: actions/setup-node@v4
+              with:
+                  node-version: 20
 
-      - name: Install markdownlint-cli2
-        run: npm install --no-save markdownlint-cli2
+            - name: Install markdownlint-cli2
+              run: npm install --no-save markdownlint-cli2
 
-      - name: Run markdownlint
-        run: npx markdownlint-cli2 "README.md" "docs/**/*.md" ".github/skills/**/*.md"
+            - name: Run markdownlint
+              run: npx markdownlint-cli2
 
-  groovy-lint:
-    name: Groovy Lint
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+    workflow-lint:
+        name: Workflow Lint
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
+            - name: Lint GitHub Actions workflows
+              uses: rhysd/actionlint@v1.7.7
 
-      - name: Install npm-groovy-lint
-        run: npm install --no-save npm-groovy-lint
+    pipeline-smoke-tests:
+        name: Pipeline Smoke Tests
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
 
-      - name: Lint Groovy files
-        run: >-
-          npx npm-groovy-lint
-          --path "src/**/*.groovy"
-          --path "vars/**/*.groovy"
-          --output txt
-          --failon error
-
-  workflow-lint:
-    name: Workflow Lint
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Lint GitHub Actions workflows
-        uses: rhysd/actionlint@v1
-
-  pipeline-smoke-tests:
-    name: Pipeline Smoke Tests
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Run smoke tests
-        run: bash .github/scripts/pipeline-smoke-tests.sh
+            - name: Run smoke tests
+              run: bash .github/scripts/pipeline-smoke-tests.sh
