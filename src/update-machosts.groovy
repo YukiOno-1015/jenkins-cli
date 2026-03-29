@@ -82,6 +82,10 @@ export DEBIAN_FRONTEND=noninteractive
 ${REMOTE_PREPARE_APT}
 
 ${disableNodeSourceRepo ? '''
+if [ -f /etc/apt/sources.list ]; then
+    sed -i -e '/nodesource\.com/s/^/# disabled by jenkins update: /' /etc/apt/sources.list || true
+fi
+
 if [ -d /etc/apt/sources.list.d ]; then
     find /etc/apt/sources.list.d -type f | grep -zE '\\.(list|sources)$' | xargs -0 -r sed -i -e '/nodesource\\.com/s/^/# disabled by jenkins update: /' || true
 fi
