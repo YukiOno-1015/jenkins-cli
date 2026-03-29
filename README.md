@@ -14,6 +14,7 @@ Jenkins 用の共有ライブラリとパイプライン定義を提供するプ
 
 - [機能](#機能)
 - [プロジェクト構成](#プロジェクト構成)
+- [SKILL対応マップ](#skill対応マップ)
 - [クイックスタート](#クイックスタート)
 - [前提条件](#前提条件)
 - [セットアップ](#セットアップ)
@@ -85,6 +86,7 @@ jenkins-cli/
 │   ├── UNIFIED_WEBHOOK_SETUP.md            # 統合Webhookパイプラインのセットアップガイド
 │   ├── REPOSITORY_CONFIG_GUIDE.md          # リポジトリ設定管理ガイド
 │   ├── AUTHENTICATION_GUIDE.md              # 認証設定ガイド
+│   ├── OPERATIONS_OVERVIEW.md              # 運用系パイプラインの概要
 │   └── templates/local.Jenkins.Agent.launchd.plist # machost用launchdテンプレート
 │
 ├── src/                                     # パイプライン定義
@@ -123,6 +125,35 @@ jenkins-cli/
 | **vars/core/authenticatedCheckout.groovy**  | 🔐 認証管理         | 認証情報を自動解決してチェックアウト |
 | **docs/UNIFIED_WEBHOOK_SETUP.md**           | 📖 セットアップ     | 詳細なセットアップ手順               |
 | **docs/REPOSITORY_CONFIG_GUIDE.md**         | 📖 設定ガイド       | 設定管理の詳細ガイド                 |
+
+## SKILL対応マップ
+
+GitHub Copilot 向けの SKILL と、実際に参照すべき主要ファイルの対応は次の通りです。
+
+```mermaid
+flowchart TD
+  A[README.md] --> B[Build and Ops Overview]
+
+  S1[Skill: jenkins-machost-updates] --> F1[src/update-machosts.groovy]
+  S2[Skill: proxmox-host-maintenance] --> F2[src/update-proxmox-hosts.groovy]
+  S3[Skill: cloudflare-allowlist-pipeline] --> F3[src/declarative-pipeline.groovy]
+  S4[Skill: macos-jenkins-agent-launchd] --> F4[docs/templates/local.Jenkins.Agent.launchd.plist]
+
+  B --> C1[vars/repositoryConfig.groovy]
+  B --> C2[vars/k8sMavenNodePipeline.groovy]
+  B --> C3[src/unifiedWebhookPipeline.groovy]
+
+  F1 --> M1[machost agent]
+  F2 --> M1
+  F3 --> M1
+  F2 --> N1[Slack or Discord credentials]
+  F3 --> N2[Cloudflare credentials]
+  F4 --> M1
+```
+
+- build 系の入口は `README.md`、`vars/repositoryConfig.groovy`、`vars/k8sMavenNodePipeline.groovy`、`src/unifiedWebhookPipeline.groovy`
+- 運用系の入口は `src/update-machosts.groovy`、`src/update-proxmox-hosts.groovy`、`src/declarative-pipeline.groovy`
+- macOS 上の Jenkins agent 常駐設定は `docs/templates/local.Jenkins.Agent.launchd.plist` を参照
 
 ## クイックスタート
 
@@ -574,6 +605,13 @@ def config = repositoryConfig.getCurrent()
   - 認証情報の設定と管理
   - `authenticatedCheckout`の使用方法
   - トラブルシューティング
+
+### 📙 運用概要ガイド
+
+- **[OPERATIONS_OVERVIEW.md](docs/OPERATIONS_OVERVIEW.md)**
+  - machost / Proxmox / Cloudflare 運用パイプラインの責務整理
+  - Jenkins agent・通知・認証情報の運用ポイント
+  - SKILL と実ファイルの対応関係
 
 ## トラブルシューティング
 
