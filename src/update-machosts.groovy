@@ -26,9 +26,17 @@ def TARGET_HOSTS = [
     // NFSサーバ
     'nfs01',
     'nfs02',
+    'machost',
+    'macmini'
 ]
 
 def SSH_USER = 'honoka'
+
+// macOS ホストは brew update/upgrade で更新する
+def MACOS_HOSTS = [
+    'machost',
+    'macmini'
+]
 
 // root で直接入るホスト
 def ROOT_LOGIN_HOSTS = [
@@ -104,6 +112,26 @@ apt-get autoremove --purge -y
 """.trim()
 }
 
+def buildMacOsUpdateCommand = {
+        return '''
+set -euo pipefail
+
+if [ -x /opt/homebrew/bin/brew ]; then
+    eval "$(/opt/homebrew/bin/brew shellenv)"
+elif [ -x /usr/local/bin/brew ]; then
+    eval "$(/usr/local/bin/brew shellenv)"
+fi
+
+command -v brew >/dev/null 2>&1 || {
+    echo "brew command not found"
+    exit 1
+}
+
+brew update
+brew upgrade
+'''.trim()
+}
+
 def runSshAsRoot = { host, remoteScript ->
     sh """
         ssh -o StrictHostKeyChecking=no -o BatchMode=yes -A root@${host} 'bash -s' <<'REMOTE_SCRIPT'
@@ -120,8 +148,22 @@ REMOTE_SCRIPT
     """
 }
 
+def runSshAsUser = { host, sshUser, remoteScript ->
+    sh """
+        ssh -o StrictHostKeyChecking=no -o BatchMode=yes -A ${sshUser}@${host} 'bash -s' <<'REMOTE_SCRIPT'
+${remoteScript}
+REMOTE_SCRIPT
+    """
+}
+
 def runUpdateOnHost = { host, sshUser, aptExpiredMetadataWorkaroundHosts ->
     echo "==== Updating ${host} ===="
+
+    if (MACOS_HOSTS.contains(host)) {
+        runSshAsUser(host, sshUser, buildMacOsUpdateCommand())
+        return
+    }
+
     def useWorkaround = aptExpiredMetadataWorkaroundHosts.contains(host)
     def disableNodeSourceRepo = NODESOURCE_REPO_DISABLE_HOSTS.contains(host)
     def remoteScript = buildUpdateCommand(useWorkaround, disableNodeSourceRepo)
