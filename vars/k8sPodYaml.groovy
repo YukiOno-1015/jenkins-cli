@@ -8,22 +8,26 @@ def call(Map args = [:]) {
     
     // 引数 > repositoryConfig > デフォルト値 の優先順位
     def image = args.get('image', config?.k8s?.image ?: 'honoka4869/jenkins-maven-node:latest')
-    def imagePullSecret = args.get('imagePullSecret', 'docker-hub')
+    def imagePullSecret = args.containsKey('imagePullSecret') ? args.get('imagePullSecret') : 'docker-hub'
     def cpuReq = args.get('cpuRequest', config?.k8s?.cpuRequest ?: '500m')
     def memReq = args.get('memRequest', config?.k8s?.memRequest ?: '2Gi')
     def cpuLim = args.get('cpuLimit', config?.k8s?.cpuLimit ?: '2')
     def memLim = args.get('memLimit', config?.k8s?.memLimit ?: '4Gi')
 
     // YAML生成をより保守性の高い形式で
+    def imagePullSecretBlock = imagePullSecret?.toString()?.trim()
+      ? """
+  imagePullSecrets:
+    - name: ${imagePullSecret}
+"""
+      : '\n'
     return """---
 apiVersion: v1
 kind: Pod
 metadata:
   labels:
     jenkins: jenkins-k8s-maven-node
-spec:
-  imagePullSecrets:
-    - name: ${imagePullSecret}
+spec:${imagePullSecretBlock}
   containers:
     - name: build
       image: ${image}
