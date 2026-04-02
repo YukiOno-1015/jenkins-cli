@@ -15,8 +15,8 @@ pipeline {
   agent {
     kubernetes {
       yaml k8sPodYaml(
-        image: 'bitnami/git:2.49.0',
-        imagePullSecret: '',
+        image: 'honoka4869/jenkins-maven-node:latest',
+        imagePullSecret: 'dockerhub-jenkins-agent',
         cpuRequest: '250m',
         memRequest: '512Mi',
         cpuLimit: '1',
