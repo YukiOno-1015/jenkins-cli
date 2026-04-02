@@ -37,10 +37,11 @@ pipeline {
       defaultValue: 'yukiono',
       description: 'SSH 接続ユーザ'
     )
-    string(
+    credentials(
       name: 'SSH_CREDENTIALS_ID',
-      defaultValue: 'MACHOST_SSH',
-      description: 'Jenkins の SSH Username with private key credentials ID'
+      credentialType: 'com.cloudbees.jenkins.plugins.sshcredentials.impl.BasicSSHUserPrivateKey',
+      defaultValue: 'jqit-github-ssh',
+      description: 'Jenkins の SSH Username with private key credentials ID（例: jqit-github-ssh）'
     )
     string(
       name: 'KNOWN_HOST',
@@ -104,7 +105,7 @@ pipeline {
           def osInfo = remoteSsh(
             host: params.TARGET_HOST.trim(),
             user: params.SSH_USER.trim(),
-            sshCredentialsId: params.SSH_CREDENTIALS_ID.trim(),
+            sshCredentialsId: params.SSH_CREDENTIALS_ID?.toString()?.trim(),
             knownHost: knownHost,
             useSudo: params.USE_SUDO,
             strictHostKeyChecking: params.STRICT_HOST_KEY_CHECKING,
