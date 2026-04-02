@@ -65,6 +65,31 @@ gitCloneSsh(
 )
 ```
 
+### 4. `vars/remoteSsh.groovy`
+
+**役割**: SSH認証で任意コマンドやスクリプトを安全に実行
+
+```groovy
+def osInfo = remoteSsh(
+  host: 'machost',
+  user: 'yukiono',
+  sshCredentialsId: 'MACHOST_SSH',
+  knownHost: 'machost',
+  command: '''
+if command -v sw_vers >/dev/null 2>&1; then
+  sw_vers
+elif [ -f /etc/os-release ]; then
+  cat /etc/os-release
+else
+  uname -a
+fi
+''',
+  returnStdout: true
+)
+
+echo osInfo
+```
+
 ## 🔄 認証フロー
 
 ### Multibranch Pipeline（推奨）
@@ -166,6 +191,59 @@ stage('Clone Multiple Repos') {
         branch: 'main',
         sshCredentialsId: libAuth.credentialsId,
         dir: 'lib'
+      )
+    }
+  }
+}
+```
+
+### 例4: SSHでOSバージョンを確認
+
+```groovy
+stage('Check Remote OS Version') {
+  steps {
+    script {
+      def osInfo = remoteSsh(
+        host: 'machost',
+        user: 'yukiono',
+        sshCredentialsId: 'MACHOST_SSH',
+        knownHost: 'machost',
+        command: '''
+if command -v sw_vers >/dev/null 2>&1; then
+  sw_vers
+elif [ -f /etc/os-release ]; then
+  cat /etc/os-release
+else
+  uname -a
+fi
+''',
+        returnStdout: true
+      )
+
+      echo "Remote OS information:\n${osInfo}"
+    }
+  }
+}
+```
+
+### 例5: SSHで任意スクリプトを実行
+
+```groovy
+stage('Run Remote Deploy Script') {
+  steps {
+    script {
+      remoteSsh(
+        host: 'app-host01',
+        user: 'deployer',
+        sshCredentialsId: 'APP_HOST_SSH',
+        knownHost: 'app-host01',
+        script: '''
+cd /srv/myapp
+git fetch --all
+git reset --hard origin/main
+docker compose up -d --build
+''',
+        useSudo: false
       )
     }
   }
