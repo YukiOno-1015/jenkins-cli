@@ -44,6 +44,21 @@ def call(Map cfg = [:]) {
     def archivePattern = cfg.get('archivePattern', repoConfig.archivePattern)
     def skipArchive = cfg.get('skipArchive', repoConfig.skipArchive)
 
+    // リモート配置設定。必要時だけ有効化し、通常のビルドでは何もしない。
+    def enableRemoteDeploy = cfg.containsKey('enableRemoteDeploy') ? cfg.get('enableRemoteDeploy').toString().toBoolean() : false
+    def deployArtifactPattern = cfg.get('deployArtifactPattern', archivePattern ?: '**/target/*.war')?.toString()?.trim()
+    def deployHost = cfg.get('deployHost', '')?.toString()?.trim()
+    def deployUser = cfg.get('deployUser', '')?.toString()?.trim()
+    def deployPort = (cfg.get('deployPort', 22) as Integer)
+    def deployKnownHost = cfg.get('deployKnownHost', deployHost ?: '')?.toString()?.trim()
+    def requestedDeployCredId = cfg.containsKey('deploySshCredentialsId') ? cfg.get('deploySshCredentialsId') : null
+    requestedDeployCredId = requestedDeployCredId?.toString()?.trim()
+    def deploySshCredId = requestedDeployCredId ?: gitSshCredId
+    def deployTargetDir = cfg.get('deployTargetDir', '/tmp/app-deploy')?.toString()?.trim()
+    def deployCommand = cfg.get('deployCommand', '')?.toString()
+    def runDeployCommand = cfg.containsKey('runDeployCommand') ? cfg.get('runDeployCommand').toString().toBoolean() : false
+    def deployUseSudo = cfg.containsKey('deployUseSudo') ? cfg.get('deployUseSudo').toString().toBoolean() : false
+
     def enableSonarQube = cfg.get('enableSonarQube', repoConfig.sonarEnabled)
     def configuredSonarCredId = repoConfig.sonarQubeCredentialsId?.toString()?.trim()
     def requestedSonarCredId = cfg.containsKey('sonarQubeCredentialsId') ? cfg.get('sonarQubeCredentialsId') : null
@@ -110,6 +125,16 @@ def call(Map cfg = [:]) {
                 name: 'enableSonarQube',
                 defaultValue: enableSonarQube,
                 description: "Run SonarQube analysis (default: ${enableSonarQube})"
+            )
+            booleanParam(
+                name: 'enableRemoteDeploy',
+                defaultValue: enableRemoteDeploy,
+                description: 'JAR / WAR などの成果物を SSH でリモートへ転送する'
+            )
+            booleanParam(
+                name: 'runDeployCommand',
+                defaultValue: runDeployCommand,
+                description: '転送後に deployCommand を実行して配置・再起動まで行う'
             )
         }
 
@@ -287,6 +312,115 @@ def call(Map cfg = [:]) {
                     )
                 }
             }
+
+            stage('Remote Deploy') {
+                when {
+                    expression { params.enableRemoteDeploy }
+                }
+                steps {
+                    container('build') {
+                        script {
+                            if (!deployHost) {
+                                error('deployHost is required when enableRemoteDeploy=true')
+                            }
+                            if (!deployUser) {
+                                error('deployUser is required when enableRemoteDeploy=true')
+                            }
+                            if (!deploySshCredId) {
+                                error('deploySshCredentialsId could not be resolved for remote deploy')
+                            }
+                            if (!deployArtifactPattern) {
+                                error('deployArtifactPattern is required when enableRemoteDeploy=true')
+                            }
+
+                            def matchedArtifacts = findFiles(glob: deployArtifactPattern)
+                                .findAll { !it.directory }
+                                .collect { it.path }
+                                .sort()
+
+                            if (!matchedArtifacts) {
+                                error("No deployment artifacts matched pattern: ${deployArtifactPattern}")
+                            }
+
+                            def remoteArtifactPaths = matchedArtifacts.collect { path ->
+                                "${deployTargetDir}/${path.tokenize('/').last()}"
+                            }
+
+                            echo "Remote deploy target: ${deployUser}@${deployHost}:${deployTargetDir}"
+                            echo "Deployment artifacts: ${matchedArtifacts.join(', ')}"
+
+                            // 配置先は scp で書き込める staging ディレクトリを想定する。
+                            // 本番ディレクトリへの反映やサービス再起動は deployCommand 側で行う。
+                            remoteSsh(
+                                host: deployHost,
+                                user: deployUser,
+                                sshCredentialsId: deploySshCredId,
+                                port: deployPort,
+                                knownHost: deployKnownHost,
+                                strictHostKeyChecking: true,
+                                command: "mkdir -p ${shellQuote(deployTargetDir)}"
+                            )
+
+                            sshagent(credentials: [deploySshCredId]) {
+                                sh """#!/bin/bash
+                                  set -euo pipefail
+
+                                  command -v scp >/dev/null 2>&1 || {
+                                    echo 'scp command not found in build container'
+                                    exit 1
+                                  }
+
+                                  mkdir -p ~/.ssh
+                                  chmod 700 ~/.ssh
+                                  touch ~/.ssh/known_hosts
+                                  chmod 600 ~/.ssh/known_hosts
+
+                                  ssh-keyscan -p ${deployPort} -t rsa,ecdsa,ed25519 -H ${shellQuote(deployKnownHost)} >> ~/.ssh/known_hosts 2>/dev/null || true
+                                  sort -u ~/.ssh/known_hosts -o ~/.ssh/known_hosts || true
+
+                                  SCP_OPTIONS=(
+                                    -o BatchMode=yes
+                                    -o ConnectTimeout=10
+                                    -o StrictHostKeyChecking=yes
+                                    -o UserKnownHostsFile=\"$HOME/.ssh/known_hosts\"
+                                    -P ${deployPort}
+                                  )
+
+                                  for artifact in ${matchedArtifacts.collect { shellQuote(it) }.join(' ')}; do
+                                    echo "Uploading ${artifact} -> ${deployUser}@${deployHost}:${deployTargetDir}/"
+                                    scp "\${SCP_OPTIONS[@]}" "$artifact" ${shellQuote("${deployUser}@${deployHost}:${deployTargetDir}/")}
+                                  done
+                                """
+                            }
+
+                            if (deployCommand?.trim() && params.runDeployCommand) {
+                                def remoteDeployCommand = """
+export DEPLOY_TARGET_DIR=${shellQuote(deployTargetDir)}
+export DEPLOY_ARTIFACT_PATHS=${shellQuote(remoteArtifactPaths.join('\n'))}
+export DEPLOY_FIRST_ARTIFACT=${shellQuote(remoteArtifactPaths.first())}
+
+${deployCommand}
+""".trim()
+
+                                remoteSsh(
+                                    host: deployHost,
+                                    user: deployUser,
+                                    sshCredentialsId: deploySshCredId,
+                                    port: deployPort,
+                                    knownHost: deployKnownHost,
+                                    useSudo: deployUseSudo,
+                                    strictHostKeyChecking: true,
+                                    command: remoteDeployCommand
+                                )
+                            } else if (deployCommand?.trim()) {
+                                echo 'runDeployCommand=false のため、成果物転送のみ実行しました。'
+                            } else {
+                                echo 'deployCommand is empty. Artifact upload only completed.'
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         post {
@@ -328,6 +462,13 @@ def call(Map cfg = [:]) {
             }
         }
     }
+}
+
+/**
+ * シェル引数として安全に埋め込めるよう、値を単一引用符でエスケープする。
+ */
+private String shellQuote(String value) {
+    return "'${(value ?: '').replace("'", "'\"'\"'")}'"
 }
 
 /**
