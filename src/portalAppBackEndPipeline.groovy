@@ -85,7 +85,7 @@ sudo rm -f "$release_link"
 sudo ln -s "$release_path" "$release_link"
 
 # 例: systemd 管理の場合。必要なら service 名や起動方法を変更してください。
-sudo systemctl restart portal-app-backend
+sudo systemctl restart backend
 
 echo "Staged artifact: $DEPLOY_FIRST_ARTIFACT"
 echo "Released artifact: $release_path"
