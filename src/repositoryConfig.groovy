@@ -18,6 +18,21 @@ def call(String repoNameOrUrl) {
   }
   
   echo "Getting configuration for repository: ${repoName}"
+
+  // SSH リモート配置先の候補はここで共通管理する。
+  // 新しい配備先が増えた場合は、このマップへ追記すれば各 Jenkinsfile 側の変更を最小化できる。
+  def sharedDeployHostConfigs = [
+    '35.160.162.206': [
+      deployUser: 'ec2-user',
+      deploySshCredentialsId: 'github-ssh',
+      deployPort: 22
+    ],
+    '13.230.227.207': [
+      deployUser: 'ec2-user',
+      deploySshCredentialsId: 'github-ssh',
+      deployPort: 22
+    ]
+  ]
   
   // リポジトリ別の設定定義
   def configs = [
@@ -31,6 +46,9 @@ def call(String repoNameOrUrl) {
       
       // 成果物
       archivePattern: '**/target/portalApp-*.jar',
+
+      // リモート配置先候補は sharedDeployHostConfigs を唯一の情報源として利用する。
+      deployHostConfigs: sharedDeployHostConfigs,
       
       // SonarQube
       sonarProjectName: 'Portal_App',
@@ -59,6 +77,9 @@ def call(String repoNameOrUrl) {
       
       // 成果物
       archivePattern: '**/target/portalApp-Api_*.jar',
+
+      // リモート配置先候補は sharedDeployHostConfigs を唯一の情報源として利用する。
+      deployHostConfigs: sharedDeployHostConfigs,
       
       // SonarQube
       sonarProjectName: 'Portal_App_Backend',
