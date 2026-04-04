@@ -59,9 +59,12 @@ def call(Map cfg = [:]) {
             }
         }
     }
-    def deployKnownHostChoices = deployHostConfigs.keySet() as List
-    if (!deployKnownHostChoices) {
-        deployKnownHostChoices = ['not-configured']
+    def deployKnownHostChoiceList = deployHostConfigs.keySet().findAll { it?.toString()?.trim() }.collect { it.toString().trim() }.sort()
+    def deployKnownHostChoices = deployKnownHostChoiceList ? deployKnownHostChoiceList.join('\n') : 'not-configured'
+    if (deployKnownHostChoiceList) {
+        echo "Remote deploy host options: ${deployKnownHostChoiceList.join(', ')}"
+    } else {
+        echo "⚠️  Remote deploy host options are not configured for ${repoConfig.repoName}"
     }
     def deployTargetDir = cfg.get('deployTargetDir', '/tmp/app-deploy')?.toString()?.trim()
     def deployUseSudo = cfg.containsKey('deployUseSudo') ? cfg.get('deployUseSudo').toString().toBoolean() : false
