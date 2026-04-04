@@ -1,6 +1,14 @@
-// Portal App Backend Build Pipeline
-// このファイルはPortal App Backendプロジェクト専用のパイプライン設定です
-// 設定はvars/repositoryConfig.groovyで一元管理されています
+/*
+ * Portal App Backend 向けのビルドパイプラインです。
+ *
+ * ここでは対象リポジトリとブランチ指定だけを薄く定義し、
+ * 認証情報・Maven/SonarQube 設定・Kubernetes Pod 設定などの詳細は
+ * Shared Library と `vars/repositoryConfig.groovy` に集約しています。
+ *
+ * 運用メモ:
+ * - 現在の変更ブランチと同名の Shared Library を優先して読み込みます。
+ * - 読み込み失敗時は `main` にフォールバックして継続します。
+ */
 
 def libBranch = env.CHANGE_BRANCH ?: env.BRANCH_NAME ?: 'main'
 def libId = "jqit-lib@${libBranch}"
@@ -23,8 +31,8 @@ properties([
   ])
 ])
 
-// repositoryConfigから全ての設定を自動取得
-// 必要に応じてブランチなどを上書き可能
+// 実ビルド本体は Shared Library に委譲し、このファイルは
+// 「Backend をどのブランチでビルドするか」を明示するエントリポイントとして扱う。
 k8sMavenNodePipeline(
   gitRepoUrl: 'git@github.com:jqit-dev/Portal_App_Backend.git',
   gitBranch: params.gitBranch ?: 'release1.0.0'

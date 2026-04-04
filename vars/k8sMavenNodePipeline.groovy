@@ -1,3 +1,16 @@
+/*
+ * Kubernetes 上の Jenkins agent で Maven / Node 系ビルドを標準化する共有パイプラインです。
+ *
+ * 役割:
+ * - Git clone / Maven build / SonarQube / artifact archive の一連の流れを共通化する
+ * - リポジトリ固有設定は `repositoryConfig()` から自動取得する
+ * - 例外的な差分だけを `cfg` から上書きし、各 Jenkinsfile を薄く保つ
+ */
+
+/**
+ * 標準ビルドパイプラインを生成して実行する。
+ * `gitRepoUrl` は必須で、その他の値は `cfg > repositoryConfig > デフォルト値` の順で解決する。
+ */
 def call(Map cfg = [:]) {
     // ---- gitRepoUrlは必須 ----
     def gitRepoUrl = cfg.gitRepoUrl ?: error('gitRepoUrl is required')
@@ -317,6 +330,9 @@ def call(Map cfg = [:]) {
     }
 }
 
+/**
+ * SonarQube の projectKey として利用できるよう、ブランチ名を安全な文字列へ正規化する。
+ */
 private String sanitizeForSonarProjectKey(String value) {
     def sanitized = (value ?: 'main').replaceAll('[^A-Za-z0-9_.:-]', '_')
     return sanitized ?: 'main'

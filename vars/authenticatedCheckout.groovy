@@ -1,6 +1,21 @@
-// Authenticated Git Checkout Helper
-// リポジトリに応じた認証情報を自動選択してGit操作を実行
+/*
+ * リポジトリ設定に応じて認証情報を自動解決し、checkout を実行するヘルパーです。
+ *
+ * 主な役割:
+ * - `repositoryConfig()` から対象リポジトリの設定を取得する
+ * - Jenkins 環境変数へ `REPO_NAME` / `GIT_CREDENTIALS_ID` を保存する
+ * - `checkout scm` または `gitCloneSsh()` のどちらかで実際の取得処理を行う
+ */
 
+/**
+ * 認証付き checkout を実行するエントリポイント。
+ *
+ * 想定引数:
+ * - `repoUrl`: 対象リポジトリ URL（未指定時は `env.GIT_URL` を利用）
+ * - `branch`: checkout 対象ブランチ
+ * - `dir`: 配置先ディレクトリ
+ * - `useScm`: true の場合は `checkout scm` を優先
+ */
 def call(Map args = [:]) {
   // 必須パラメータのバリデーション
   if (!args.repoUrl && !env.GIT_URL) {
@@ -63,7 +78,10 @@ def call(Map args = [:]) {
   ]
 }
 
-// シンプルな認証情報取得のみの関数
+/**
+ * checkout は行わず、対象リポジトリに必要な認証情報だけを取得する補助関数。
+ * 他の Shared Library から資格情報解決だけを再利用したい場合に使う。
+ */
 def getCredentials(String repoUrl = null) {
   def url = repoUrl ?: env.GIT_URL
   if (!url) {

@@ -1,16 +1,20 @@
-// 統合GitHub Webhook Pipeline (Shared Library版)
-// 使用例:
-// @Library('jqit-lib@main') _
-// unifiedWebhookPipeline()
-//
-// 動作:
-// 1. リポジトリにJenkinsfileがあれば、それを使用
-// 2. なければ、デフォルトでユニットテスト+SonarQubeを実行
-// 
-// 特徴:
-// - リポジトリごとにカスタムパイプライン定義可能
-// - repositoryConfig.groovyから自動設定取得
+/*
+ * 統合 GitHub Webhook パイプラインの Shared Library 版です。
+ *
+ * 使用例:
+ *   @Library('jqit-lib@main') _
+ *   unifiedWebhookPipeline()
+ *
+ * 主な役割:
+ * - Webhook 起点の checkout / 設定取得 / Jenkinsfile 判定を共通化する
+ * - 個別 Jenkinsfile が無いリポジトリにも最低限のテスト・SonarQube フローを提供する
+ * - パイプライン設定のデフォルト値を一箇所にまとめ、呼び出し側を簡潔に保つ
+ */
 
+/**
+ * 統合 Webhook パイプラインを起動する。
+ * `config` で namespace やデフォルトパラメータを必要最小限だけ上書きできる。
+ */
 def call(Map config = [:]) {
   // デフォルト設定
   def defaults = [

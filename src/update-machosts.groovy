@@ -1,8 +1,17 @@
-// Jenkins用: 複数machostサーバにsshで自動アップデートを定期実行
+/*
+ * 複数の Debian / Ubuntu / macOS ホストへ定期的にアップデートを適用する
+ * 運用向け Jenkins パイプラインです。
+ *
+ * 設計方針:
+ * - ホスト一覧を役割ごとに明示し、対象範囲をコード上で追いやすくする
+ * - root 直ログイン / sudo 実行 / macOS 更新を分岐し、ホストごとの差異を吸収する
+ * - 1 台ごとの失敗を記録して、どのホストで問題が起きたか後追いしやすくする
+ */
 
 def TARGET_HOSTS = [
     // さくらサーバ
     'sakura-docker',
+    // Proxmox VE サーバ
     'nico',
     'umi',
     'nozomi',
@@ -26,7 +35,7 @@ def TARGET_HOSTS = [
     // NFSサーバ
     'nfs01',
     'nfs02',
-    // macOSサーバ
+    // macOS ホスト
     'machost',
     'macmini'
 ]
@@ -79,6 +88,8 @@ if [ -d /etc/apt/sources.list.d ]; then
 fi
 '''
 
+// Debian / Ubuntu 系ホスト向けの更新コマンドを組み立てる。
+// 一部ホストだけに `Check-Valid-Until=false` を適用できるようにしている。
 def buildUpdateCommand = { boolean useValidUntilWorkaround = false ->
     def updatePart = useValidUntilWorkaround
         ? 'apt-get -o Acquire::Check-Valid-Until=false update'
@@ -98,6 +109,7 @@ apt-get autoremove --purge -y
 """.trim()
 }
 
+// macOS ホストでは Homebrew ベースで更新する。
 def buildMacOsUpdateCommand = {
     return '''
 set -euo pipefail
@@ -142,6 +154,7 @@ REMOTE_SCRIPT
     """
 }
 
+// ホスト種別に応じて適切な SSH 実行方式と更新コマンドを選択する。
 def runUpdateOnHost = { host, sshUser, macOsSshUser, aptExpiredMetadataWorkaroundHosts ->
     echo "==== Updating ${host} ===="
 

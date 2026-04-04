@@ -1,3 +1,16 @@
+/*
+ * GitHub などの SSH リモートからリポジトリを clone する共通ヘルパーです。
+ *
+ * ポイント:
+ * - `repositoryConfig()` と連携して SSH credentials ID を自動解決できます。
+ * - `known_hosts` を事前に整備し、`StrictHostKeyChecking=yes` を維持します。
+ * - clone 前に `ssh -T` で認証の事前確認を行い、失敗時の原因をログへ残します。
+ */
+
+/**
+ * SSH 認証付き clone を実行する。
+ * `repoUrl` は必須で、`branch` / `dir` / `knownHost` / `sshCredentialsId` を任意指定できる。
+ */
 def call(Map args = [:]) {
     // 必須パラメータの検証
     if (!args.repoUrl) {

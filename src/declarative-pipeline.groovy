@@ -1,12 +1,21 @@
-// Cloudflare WAF allowlist を現在の Jenkins ノード IP で更新する Declarative Pipeline
-//
-// 必要な Jenkins Credentials（Kind: Secret text）:
-//   CF_API_TOKEN : Cloudflare API Token（Zone.Firewall Services - Edit 権限）
-//   CF_ZONE_ID   : Cloudflare Zone ID
-// もしくは、実行環境に CF_API_TOKEN / CF_ZONE_ID が環境変数として注入されていれば、
-// Jenkins Credentials が無くてもその値を利用する
-//
-// 必要なプラグイン: Pipeline Utility Steps（readJSON）
+/*
+ * Cloudflare WAF allowlist を、現在の Jenkins 実行ノードのグローバル IP に追従させる
+ * Declarative Pipeline です。
+ *
+ * このジョブの役割:
+ * - 外向き IP を取得して前回値と比較する
+ * - 変更があったときだけ Cloudflare Ruleset を更新する
+ * - 直前 IP も一時的に許可対象へ残し、切り替え時の瞬断を避ける
+ *
+ * 必要な Jenkins Credentials（Kind: Secret text）:
+ *   CF_API_TOKEN : Cloudflare API Token（Zone.Firewall Services - Edit 権限）
+ *   CF_ZONE_ID   : Cloudflare Zone ID
+ *
+ * もしくは実行環境に `CF_API_TOKEN` / `CF_ZONE_ID` が事前注入されていれば、
+ * Jenkins Credentials を使わずその値を優先します。
+ *
+ * 必要なプラグイン: Pipeline Utility Steps（`readJSON`）
+ */
 
 // ---- 更新対象ルール定義 ----------------------------------------
 // desc と hostname は 1:1 で対応させること

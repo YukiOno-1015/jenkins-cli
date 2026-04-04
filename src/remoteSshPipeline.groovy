@@ -1,5 +1,12 @@
-// remoteSsh shared library の疎通確認用 Pipeline
-// 運用影響のない読み取り専用コマンドだけを実行する
+/*
+ * `remoteSsh` Shared Library の疎通確認を行うテスト用パイプラインです。
+ *
+ * 目的:
+ * - SSH 鍵・known_hosts・接続オプションが正しく機能するかを Jenkins 上で検証する
+ * - 破壊的な操作を避け、OS 情報の取得だけで接続性を確認する
+ *
+ * このジョブは本番変更ではなく、接続設定の確認に特化しています。
+ */
 
 def libBranch = env.CHANGE_BRANCH ?: env.BRANCH_NAME ?: 'main'
 def libId = "jqit-lib@${libBranch}"
@@ -101,7 +108,10 @@ pipeline {
     stage('Check Remote OS Version') {
       steps {
         script {
+          // known_hosts に登録するホスト名を明示し、未指定時のみ TARGET_HOST を使う。
           def knownHost = params.KNOWN_HOST?.trim() ? params.KNOWN_HOST.trim() : params.TARGET_HOST
+
+          // 疎通確認では OS 情報の読み取りだけを実行し、設定破壊や更新処理は行わない。
           def osInfo = remoteSsh(
             host: params.TARGET_HOST.trim(),
             user: params.SSH_USER.trim(),

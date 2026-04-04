@@ -1,7 +1,23 @@
+/*
+ * Jenkins から安全に SSH 実行を行うための Shared Library です。
+ *
+ * 目的:
+ * - 受け取った command / script を安全にリモートへ渡す
+ * - StrictHostKeyChecking の有無を切り替え可能にする
+ * - `returnStdout` により、参照専用の取得処理にも更新処理にも再利用できるようにする
+ */
+
+/**
+ * シェル引数として安全に埋め込めるよう、値を単一引用符でエスケープする。
+ */
 def shellQuote(String value) {
     return "'${(value ?: '').replace("'", "'\"'\"'")}'"
 }
 
+/**
+ * `command` または `script` のどちらか一方だけを受け取り、
+ * リモート側で `set -euo pipefail` を有効にした実行スクリプトを構築する。
+ */
 def buildRemoteScript(Map args) {
     def command = args.command?.toString()
     def script = args.script?.toString()
@@ -23,6 +39,11 @@ ${payload}
 """.trim()
 }
 
+/**
+ * SSH コマンド実行のエントリポイント。
+ * 必須項目は `host`, `user`, `sshCredentialsId` で、必要に応じて `port`,
+ * `knownHost`, `useSudo`, `strictHostKeyChecking`, `returnStdout` を上書きできる。
+ */
 def call(Map args = [:]) {
     def host = args.host?.toString()?.trim()
     def user = args.user?.toString()?.trim()

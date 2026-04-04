@@ -1,9 +1,14 @@
-// 統合GitHub Webhook Pipeline
-// 1つのWebhookエンドポイントで複数リポジトリを処理
-// 
-// 動作:
-// 1. リポジトリにJenkinsfileがあれば、それを使用
-// 2. なければ、デフォルトでユニットテスト+SonarQubeを実行
+/*
+ * 複数リポジトリを 1 本のエンドポイントで受ける統合 GitHub Webhook パイプラインです。
+ *
+ * 基本動作:
+ * 1. Webhook から対象リポジトリとイベント種別を特定する
+ * 2. `authenticatedCheckout()` で認証付き checkout と設定読込をまとめて行う
+ * 3. リポジトリに `Jenkinsfile` がある場合はその定義を優先する
+ * 4. `Jenkinsfile` が無い場合は共通のテスト / SonarQube フローを実行する
+ *
+ * なるべく共通挙動をこのファイルへ集約し、個別リポジトリ側の Jenkinsfile は最小化する方針です。
+ */
 
 def libBranch = env.CHANGE_BRANCH ?: env.BRANCH_NAME ?: 'main'
 def libId = "jqit-lib@${libBranch}"
@@ -193,7 +198,10 @@ pipeline {
 // ヘルパー関数
 // ============================================================
 
-// Webhook イベントタイプを検出
+/**
+ * Jenkins のビルドコンテキストから Webhook 種別を判定する。
+ * 現在は PR ビルドなら `pull_request`、それ以外は `push` として扱う。
+ */
 def detectWebhookEvent() {
   // Multibranch Pipeline の場合
   if (env.CHANGE_ID) {

@@ -1,8 +1,16 @@
-// Jenkins用: Proxmoxホストの更新候補監視と任意更新を行うDeclarative Pipeline
-// 任意の Jenkins Credentials（Kind: Secret text）:
-//   slack-webhook-url   : Slack Incoming Webhook URL
-//   discord-webhook-url : Discord Webhook URL
-// 更新候補を検知すると、設定済みの通知先へ Jenkins ジョブ URL と結果JSON URL を送信する
+/*
+ * Proxmox ホスト群の「更新候補の監視」と「必要時のみの安全な適用」を行う
+ * Declarative Pipeline です。
+ *
+ * 基本方針:
+ * - 通常実行では更新候補の検知だけを行い、結果を JSON と通知で共有する
+ * - `APPLY_UPDATES=true` が明示された場合だけ `full-upgrade` を実施する
+ * - クラスタ環境では quorum 状態を確認し、安全に更新できるホストだけを対象にする
+ *
+ * 任意の Jenkins Credentials（Kind: Secret text）:
+ *   slack-webhook-url   : Slack Incoming Webhook URL
+ *   discord-webhook-url : Discord Webhook URL
+ */
 
 import com.cloudbees.groovy.cps.NonCPS
 
@@ -19,6 +27,7 @@ def DISCORD_WEBHOOK_CREDENTIAL_ID = 'discord-webhook-url'
 
 def proxmoxHostResults = []
 
+// 検知結果を、人が通知で読みやすい要約文へ変換する。
 @NonCPS
 String summarizePendingUpdates(List results) {
     def hostsWithUpdates = results.findAll { it.hasUpdates }
@@ -93,6 +102,7 @@ String serializeHostResults(List results) {
     return '[\n' + entries.join(',\n') + '\n]'
 }
 
+// Webhook URL を Jenkins Credentials から受け取り、JSON payload を送信する。
 def postJsonWebhook = { String payloadText, String credentialEnvVar ->
     def payloadFile = '.proxmox-webhook-payload.json'
     writeFile file: payloadFile, text: payloadText
@@ -146,6 +156,8 @@ def buildTestNotificationBody = {
 この通知が届けば Webhook 設定は有効です。""".trim()
 }
 
+// リモート Proxmox ホスト上で実行する調査スクリプトを組み立てる。
+// ここでは更新候補・quorum・再起動要否だけを取得し、変更は加えない。
 def buildInspectScript = {
     return '''
 set -euo pipefail
@@ -271,6 +283,7 @@ Map parseMeta(String raw) {
     return meta
 }
 
+// 単一ホストを調査し、後続の通知・更新判定に使う構造化データへまとめる。
 def inspectHost = { host ->
     def raw = runRemoteScript(host, buildInspectScript())
     def meta = parseMeta(raw)
@@ -291,6 +304,7 @@ def inspectHost = { host ->
     ]
 }
 
+// 単独ノードなら更新可、クラスタ構成なら quorum が正常な場合のみ更新可と判定する。
 def canUpgradeSafely = { Map hostResult ->
     if (!hostResult.isProxmox) {
         return false

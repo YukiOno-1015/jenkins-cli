@@ -1,11 +1,15 @@
-// Repository Configuration Manager
-// リポジトリに関する全ての設定を一元管理
-// - 認証情報ID
-// - ビルド設定
-// - アーカイブパターン
-// - SonarQube設定
-// など
+/*
+ * リポジトリ別のビルド設定・認証情報・Kubernetes リソース要件を一元管理する設定台帳です。
+ *
+ * 運用意図:
+ * - 各 Jenkinsfile / Shared Library から個別設定を追い出し、保守ポイントを一本化する
+ * - 新規リポジトリ追加時はここへ定義を足すだけで、他のパイプライン側の変更を最小化する
+ * - 未定義リポジトリに対しても安全なデフォルト設定で実行可能にする
+ */
 
+/**
+ * リポジトリ名または URL を受け取り、対応する設定マップを返す。
+ */
 def call(String repoNameOrUrl) {
   // リポジトリ名を抽出
   def repoName = repoNameOrUrl
@@ -174,7 +178,9 @@ def call(String repoNameOrUrl) {
   return config
 }
 
-// リポジトリURLからリポジトリ名を抽出
+/**
+ * SSH / HTTPS 形式の GitHub URL からリポジトリ名だけを抽出する。
+ */
 def extractRepoName(String repoUrl) {
   def repoName = ''
   
@@ -196,7 +202,9 @@ def extractRepoName(String repoUrl) {
   return repoName
 }
 
-// 現在のビルドコンテキストから設定を取得
+/**
+ * 現在の Jenkins ビルド環境 (`env.GIT_URL`) から設定を解決する。
+ */
 def getCurrent() {
   if (env.GIT_URL) {
     return call(env.GIT_URL)
@@ -206,13 +214,18 @@ def getCurrent() {
   }
 }
 
-// 認証情報IDのみを取得（後方互換性のため）
+/**
+ * 後方互換用に credentialsId だけを返す簡易アクセサ。
+ */
 def getCredentialsId(String repoNameOrUrl) {
   def config = call(repoNameOrUrl)
   return config.credentialsId
 }
 
-// 複数リポジトリの設定を一括取得
+/**
+ * 主要リポジトリの設定一覧をまとめて返す。
+ * ドキュメント生成や検証用途での参照を想定している。
+ */
 def getAll() {
   def repoNames = ['Portal_App', 'Portal_App_Backend']
   def allConfigs = [:]

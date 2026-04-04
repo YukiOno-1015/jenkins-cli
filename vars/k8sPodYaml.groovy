@@ -1,3 +1,16 @@
+/*
+ * Jenkins Kubernetes agent 用の Pod YAML を組み立てるヘルパーです。
+ *
+ * 設計方針:
+ * - 呼び出し引数で個別上書きできるようにする
+ * - 未指定項目は `repositoryConfig()` のリポジトリ別設定を優先する
+ * - 最後に安全なデフォルト値で補完し、呼び出し元の定義を簡潔に保つ
+ */
+
+/**
+ * Pod テンプレート文字列を返す。
+ * `image`, `imagePullSecret`, `cpuRequest`, `memRequest`, `cpuLimit`, `memLimit` を上書き可能。
+ */
 def call(Map args = [:]) {
     // repositoryConfigから設定を取得（オプション）
     def config = null
