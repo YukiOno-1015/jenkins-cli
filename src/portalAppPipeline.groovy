@@ -55,29 +55,36 @@ k8sMavenNodePipeline(
   deployUser: 'ec2-user',
   deploySshCredentialsId: 'github-ssh',
   deployKnownHost: '35.160.162.206',
+  // `/opt/portal-app` は最終配置先、scp 転送自体は `/tmp/portal-app` へ staging する。
   deployTargetDir: '/opt/portal-app',
+  deployUploadDir: '/tmp/portal-app',
   deployUseSudo: true,
   deployCommand: '''
 set -euo pipefail
 
-# `DEPLOY_FIRST_ARTIFACT` は、SSH 転送後の「リモート側フルパス」です。
-# 例: /opt/portal-app/portalApp-1.0.0.jar
+# `DEPLOY_FIRST_ARTIFACT` は、SSH 転送後の staging 側フルパスです。
 artifact_path="$DEPLOY_FIRST_ARTIFACT"
 artifact_name="$(basename "$artifact_path")"
-release_link="/opt/portal-app/portalApp.jar"
+release_dir="$DEPLOY_TARGET_DIR"
+release_path="$release_dir/$artifact_name"
+release_link="$release_dir/portalApp.jar"
 backup_suffix="$(date +%Y%m%d%H%M%S)"
 
-# 既存の旧版 JAR は、今回アップロードしたものを除いて退避しておく。
-find "$DEPLOY_TARGET_DIR" -maxdepth 1 -type f -name 'portalApp-*.jar' ! -name "$artifact_name" -print | while read -r old_jar; do
+mkdir -p "$release_dir"
+
+# 既存の旧版 JAR は、今回リリースするものを除いて退避しておく。
+find "$release_dir" -maxdepth 1 -type f -name 'portalApp-*.jar' ! -name "$artifact_name" -print | while read -r old_jar; do
   mv "$old_jar" "$old_jar.bak_${backup_suffix}"
 done
 
+install -m 0644 "$artifact_path" "$release_path"
 rm -f "$release_link"
-ln -s "$artifact_path" "$release_link"
+ln -s "$release_path" "$release_link"
 
 systemctl restart portal
 
-echo "Uploaded artifact: $DEPLOY_FIRST_ARTIFACT"
+echo "Staged artifact: $DEPLOY_FIRST_ARTIFACT"
+echo "Released artifact: $release_path"
 ''',
 
   // 以下の設定は repositoryConfig.groovy から自動取得されます:

@@ -55,9 +55,11 @@ def call(Map cfg = [:]) {
     requestedDeployCredId = requestedDeployCredId?.toString()?.trim()
     def deploySshCredId = requestedDeployCredId ?: gitSshCredId
     def deployTargetDir = cfg.get('deployTargetDir', '/tmp/app-deploy')?.toString()?.trim()
+    def deployUseSudo = cfg.containsKey('deployUseSudo') ? cfg.get('deployUseSudo').toString().toBoolean() : false
+    def deployUploadDirDefault = deployUseSudo ? "/tmp/${sanitizeForPathSegment(repoConfig.repoName ?: 'app')}-deploy" : deployTargetDir
+    def deployUploadDir = cfg.get('deployUploadDir', deployUploadDirDefault)?.toString()?.trim()
     def deployCommand = cfg.get('deployCommand', '')?.toString()
     def runDeployCommand = cfg.containsKey('runDeployCommand') ? cfg.get('runDeployCommand').toString().toBoolean() : false
-    def deployUseSudo = cfg.containsKey('deployUseSudo') ? cfg.get('deployUseSudo').toString().toBoolean() : false
 
     def enableSonarQube = cfg.get('enableSonarQube', repoConfig.sonarEnabled)
     def configuredSonarCredId = repoConfig.sonarQubeCredentialsId?.toString()?.trim()
@@ -343,14 +345,15 @@ def call(Map cfg = [:]) {
                             }
 
                             def remoteArtifactPaths = matchedArtifacts.collect { path ->
-                                "${deployTargetDir}/${path.tokenize('/').last()}"
+                                "${deployUploadDir}/${path.tokenize('/').last()}"
                             }
 
                             echo "Remote deploy target: ${deployUser}@${deployHost}:${deployTargetDir}"
+                            echo "Remote upload staging dir: ${deployUploadDir}"
                             echo "Deployment artifacts: ${matchedArtifacts.join(', ')}"
 
-                            // 配置先は scp で書き込める staging ディレクトリを想定する。
-                            // 本番ディレクトリへの反映やサービス再起動は deployCommand 側で行う。
+                            // `deployTargetDir` は最終的な配置先、`deployUploadDir` は scp 用の一時配置先として扱う。
+                            // root 配下へ直接 scp できない環境でも、staging 後に deployCommand で sudo 配置できるようにする。
                             remoteSsh(
                                 host: deployHost,
                                 user: deployUser,
@@ -358,7 +361,7 @@ def call(Map cfg = [:]) {
                                 port: deployPort,
                                 knownHost: deployKnownHost,
                                 strictHostKeyChecking: true,
-                                command: "mkdir -p ${shellQuote(deployTargetDir)}"
+                                command: "mkdir -p ${shellQuote(deployUploadDir)}"
                             )
 
                             sshagent(credentials: [deploySshCredId]) {
@@ -387,8 +390,8 @@ def call(Map cfg = [:]) {
                                   )
 
                                   for artifact in ${matchedArtifacts.collect { shellQuote(it) }.join(' ')}; do
-                                    echo "Uploading ${artifact} -> ${deployUser}@${deployHost}:${deployTargetDir}/"
-                                    scp "\${SCP_OPTIONS[@]}" "$artifact" ${shellQuote("${deployUser}@${deployHost}:${deployTargetDir}/")}
+                                    echo "Uploading ${artifact} -> ${deployUser}@${deployHost}:${deployUploadDir}/"
+                                    scp "\${SCP_OPTIONS[@]}" "$artifact" ${shellQuote("${deployUser}@${deployHost}:${deployUploadDir}/")}
                                   done
                                 """
                             }
@@ -396,6 +399,7 @@ def call(Map cfg = [:]) {
                             if (deployCommand?.trim() && params.runDeployCommand) {
                                 def remoteDeployCommand = """
 export DEPLOY_TARGET_DIR=${shellQuote(deployTargetDir)}
+export DEPLOY_UPLOAD_DIR=${shellQuote(deployUploadDir)}
 export DEPLOY_ARTIFACT_PATHS=${shellQuote(remoteArtifactPaths.join('\n'))}
 export DEPLOY_FIRST_ARTIFACT=${shellQuote(remoteArtifactPaths.first())}
 
@@ -474,6 +478,11 @@ private String shellQuote(String value) {
 /**
  * SonarQube の projectKey として利用できるよう、ブランチ名を安全な文字列へ正規化する。
  */
+private String sanitizeForPathSegment(String value) {
+    def sanitized = (value ?: 'app').replaceAll('[^A-Za-z0-9_.-]', '-')
+    return sanitized ?: 'app'
+}
+
 private String sanitizeForSonarProjectKey(String value) {
     def sanitized = (value ?: 'main').replaceAll('[^A-Za-z0-9_.:-]', '_')
     return sanitized ?: 'main'
