@@ -58,16 +58,22 @@ k8sMavenNodePipeline(
   deployTargetDir: '/opt/portal-app',
   deployUseSudo: true,
   deployCommand: '''
-# ここで本番配置や再起動を必要に応じて実行する。
-# 例:
-# install -D -m 0644 "$DEPLOY_FIRST_ARTIFACT" /opt/portal-app/portalApp.jar
-# systemctl restart portal
-rm -frv /opt/portal-app/portalApp.jar
+set -euo pipefail
 
-mv "$DEPLOY_TARGET_DIR"/portalApp-*.jar "$DEPLOY_TARGET_DIR"/portalApp-*.jar.bak_$(date +%Y%m%d%H%M%S)
+# `DEPLOY_FIRST_ARTIFACT` は、SSH 転送後の「リモート側フルパス」です。
+# 例: /opt/portal-app/portalApp-1.0.0.jar
+artifact_path="$DEPLOY_FIRST_ARTIFACT"
+artifact_name="$(basename "$artifact_path")"
+release_link="/opt/portal-app/portalApp.jar"
+backup_suffix="$(date +%Y%m%d%H%M%S)"
 
-install -D -m 0644 "$DEPLOY_FIRST_ARTIFACT" /opt/portal-app/"$DEPLOY_FIRST_ARTIFACT"
-ln -s "$DEPLOY_TARGET_DIR"/"$DEPLOY_FIRST_ARTIFACT" /opt/portal-app/portalApp.jar
+# 既存の旧版 JAR は、今回アップロードしたものを除いて退避しておく。
+find "$DEPLOY_TARGET_DIR" -maxdepth 1 -type f -name 'portalApp-*.jar' ! -name "$artifact_name" -print | while read -r old_jar; do
+  mv "$old_jar" "$old_jar.bak_${backup_suffix}"
+done
+
+rm -f "$release_link"
+ln -s "$artifact_path" "$release_link"
 
 systemctl restart portal
 
