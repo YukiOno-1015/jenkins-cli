@@ -51,10 +51,9 @@ k8sMavenNodePipeline(
   enableRemoteDeploy: false,
   runDeployCommand: false,
   deployArtifactPattern: '**/target/*.jar',
-  deployHost: '35.160.162.206',
-  deployUser: 'ec2-user',
-  deploySshCredentialsId: 'github-ssh',
-  deployKnownHost: '35.160.162.206',
+
+  // 接続先候補と既定ホストは `repositoryConfig.groovy` 側へ寄せて共通管理する。
+  // ここではアプリ固有の配置先と deployCommand だけを持つ。 
   // `/opt/portal-app` は最終配置先、scp 転送自体は `/tmp/portal-app` へ staging する。
   deployTargetDir: '/opt/portal-app',
   deployUploadDir: '/tmp/portal-app',

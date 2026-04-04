@@ -44,16 +44,25 @@ def call(Map cfg = [:]) {
     def archivePattern = cfg.get('archivePattern', repoConfig.archivePattern)
     def skipArchive = cfg.get('skipArchive', repoConfig.skipArchive)
 
-    // リモート配置設定。必要時だけ有効化し、通常のビルドでは何もしない。
+    // リモート配置設定。通常は `repositoryConfig.groovy` の `deployHostConfigs` を
+    // 単一の truth source とし、ここからホスト候補と接続情報を解決する。
+    // 情報不足の設定は fail-fast で止め、曖昧なフォールバックは行わない。
     def enableRemoteDeploy = cfg.containsKey('enableRemoteDeploy') ? cfg.get('enableRemoteDeploy').toString().toBoolean() : false
     def deployArtifactPattern = cfg.get('deployArtifactPattern', archivePattern ?: '**/target/*.jar')?.toString()?.trim()
-    def deployHost = cfg.get('deployHost', '')?.toString()?.trim()
-    def deployUser = cfg.get('deployUser', '')?.toString()?.trim()
-    def deployPort = (cfg.get('deployPort', 22) as Integer)
-    def deployKnownHost = cfg.get('deployKnownHost', deployHost ?: '')?.toString()?.trim()
-    def requestedDeployCredId = cfg.containsKey('deploySshCredentialsId') ? cfg.get('deploySshCredentialsId') : null
-    requestedDeployCredId = requestedDeployCredId?.toString()?.trim()
-    def deploySshCredId = requestedDeployCredId ?: gitSshCredId
+    def deployHostConfigs = [:]
+    def deployHostConfigsRaw = cfg.containsKey('deployHostConfigs') ? (cfg.get('deployHostConfigs', [:]) ?: [:]) : (repoConfig.get('deployHostConfigs', [:]) ?: [:])
+    if (deployHostConfigsRaw instanceof Map) {
+        deployHostConfigsRaw.each { hostKey, hostCfg ->
+            def normalizedKey = hostKey?.toString()?.trim()
+            if (normalizedKey) {
+                deployHostConfigs[normalizedKey] = hostCfg instanceof Map ? hostCfg : [:]
+            }
+        }
+    }
+    def deployKnownHostChoices = deployHostConfigs.keySet() as List
+    if (!deployKnownHostChoices) {
+        deployKnownHostChoices = ['not-configured']
+    }
     def deployTargetDir = cfg.get('deployTargetDir', '/tmp/app-deploy')?.toString()?.trim()
     def deployUseSudo = cfg.containsKey('deployUseSudo') ? cfg.get('deployUseSudo').toString().toBoolean() : false
     def deployUploadDirDefault = deployUseSudo ? "/tmp/${sanitizeForPathSegment(repoConfig.repoName ?: 'app')}-deploy" : deployTargetDir
@@ -127,6 +136,11 @@ def call(Map cfg = [:]) {
                 name: 'enableSonarQube',
                 defaultValue: enableSonarQube,
                 description: "Run SonarQube analysis (default: ${enableSonarQube})"
+            )
+            choice(
+                name: 'deployKnownHost',
+                choices: deployKnownHostChoices,
+                description: 'Remote Deploy 先ホスト。deployUser / SSH credentials はホスト設定から自動解決する'
             )
             booleanParam(
                 name: 'enableRemoteDeploy',
@@ -322,15 +336,57 @@ def call(Map cfg = [:]) {
                 steps {
                     container('build') {
                         script {
-                            if (!deployHost) {
-                                error('deployHost is required when enableRemoteDeploy=true')
+                            def selectedDeployKnownHost = params.deployKnownHost?.toString()?.trim()
+                            if (!selectedDeployKnownHost || selectedDeployKnownHost == 'not-configured') {
+                                error('deployKnownHost is not configured. Define deployHostConfigs in repositoryConfig.groovy or pipeline cfg.')
                             }
-                            if (!deployUser) {
-                                error('deployUser is required when enableRemoteDeploy=true')
+
+                            def selectedDeployConfig = deployHostConfigs[selectedDeployKnownHost]
+                            if (!(selectedDeployConfig instanceof Map) || selectedDeployConfig.isEmpty()) {
+                                error("No deploy host configuration found for selected host: ${selectedDeployKnownHost}")
                             }
-                            if (!deploySshCredId) {
-                                error('deploySshCredentialsId could not be resolved for remote deploy')
+
+                            def resolvedDeployHost = (
+                                selectedDeployConfig.get('deployHost')
+                                    ?: selectedDeployConfig.get('host')
+                                    ?: selectedDeployKnownHost
+                            )?.toString()?.trim()
+                            def resolvedDeployKnownHost = (
+                                selectedDeployConfig.get('deployKnownHost')
+                                    ?: selectedDeployConfig.get('knownHost')
+                                    ?: selectedDeployKnownHost
+                            )?.toString()?.trim()
+                            def resolvedDeployUser = (
+                                selectedDeployConfig.get('deployUser')
+                                    ?: selectedDeployConfig.get('user')
+                            )?.toString()?.trim()
+                            def resolvedDeploySshCredId = (
+                                selectedDeployConfig.get('deploySshCredentialsId')
+                                    ?: selectedDeployConfig.get('sshCredentialsId')
+                                    ?: selectedDeployConfig.get('credentialsId')
+                            )?.toString()?.trim()
+                            def resolvedDeployPortRaw = (
+                                selectedDeployConfig.get('deployPort')
+                                    ?: selectedDeployConfig.get('port')
+                            )
+
+                            if (!resolvedDeployHost) {
+                                error("deployHost could not be resolved for selected host: ${selectedDeployKnownHost}")
                             }
+                            if (!resolvedDeployKnownHost) {
+                                error("deployKnownHost could not be resolved for selected host: ${selectedDeployKnownHost}")
+                            }
+                            if (!resolvedDeployUser) {
+                                error("deployUser could not be resolved for selected host: ${selectedDeployKnownHost}")
+                            }
+                            if (!resolvedDeploySshCredId) {
+                                error("deploySshCredentialsId could not be resolved for selected host: ${selectedDeployKnownHost}")
+                            }
+                            if (resolvedDeployPortRaw == null || resolvedDeployPortRaw.toString().trim() == '') {
+                                error("deployPort could not be resolved for selected host: ${selectedDeployKnownHost}")
+                            }
+                            def resolvedDeployPort = (resolvedDeployPortRaw as Integer)
+
                             if (!deployArtifactPattern) {
                                 error('deployArtifactPattern is required when enableRemoteDeploy=true')
                             }
@@ -348,23 +404,24 @@ def call(Map cfg = [:]) {
                                 "${deployUploadDir}/${path.tokenize('/').last()}"
                             }
 
-                            echo "Remote deploy target: ${deployUser}@${deployHost}:${deployTargetDir}"
+                            echo "Remote deploy selection: ${resolvedDeployKnownHost}"
+                            echo "Remote deploy target: ${resolvedDeployUser}@${resolvedDeployHost}:${deployTargetDir}"
                             echo "Remote upload staging dir: ${deployUploadDir}"
                             echo "Deployment artifacts: ${matchedArtifacts.join(', ')}"
 
                             // `deployTargetDir` は最終的な配置先、`deployUploadDir` は scp 用の一時配置先として扱う。
                             // root 配下へ直接 scp できない環境でも、staging 後に deployCommand で sudo 配置できるようにする。
                             remoteSsh(
-                                host: deployHost,
-                                user: deployUser,
-                                sshCredentialsId: deploySshCredId,
-                                port: deployPort,
-                                knownHost: deployKnownHost,
+                                host: resolvedDeployHost,
+                                user: resolvedDeployUser,
+                                sshCredentialsId: resolvedDeploySshCredId,
+                                port: resolvedDeployPort,
+                                knownHost: resolvedDeployKnownHost,
                                 strictHostKeyChecking: true,
                                 command: "mkdir -p ${shellQuote(deployUploadDir)}"
                             )
 
-                            sshagent(credentials: [deploySshCredId]) {
+                            sshagent(credentials: [resolvedDeploySshCredId]) {
                                 sh """#!/bin/bash
                                   set -euo pipefail
 
@@ -378,7 +435,7 @@ def call(Map cfg = [:]) {
                                   touch ~/.ssh/known_hosts
                                   chmod 600 ~/.ssh/known_hosts
 
-                                  ssh-keyscan -p ${deployPort} -t rsa,ecdsa,ed25519 -H ${shellQuote(deployKnownHost)} >> ~/.ssh/known_hosts 2>/dev/null || true
+                                  ssh-keyscan -p ${resolvedDeployPort} -t rsa,ecdsa,ed25519 -H ${shellQuote(resolvedDeployKnownHost)} >> ~/.ssh/known_hosts 2>/dev/null || true
                                   sort -u ~/.ssh/known_hosts -o ~/.ssh/known_hosts || true
 
                                   SCP_OPTIONS=(
@@ -386,12 +443,12 @@ def call(Map cfg = [:]) {
                                     -o ConnectTimeout=10
                                     -o StrictHostKeyChecking=yes
                                     -o UserKnownHostsFile=\"\$HOME/.ssh/known_hosts\"
-                                    -P ${deployPort}
+                                    -P ${resolvedDeployPort}
                                   )
 
                                   for artifact in ${matchedArtifacts.collect { shellQuote(it) }.join(' ')}; do
-                                    echo "Uploading \$artifact -> ${deployUser}@${deployHost}:${deployUploadDir}/"
-                                    scp "\${SCP_OPTIONS[@]}" "\$artifact" ${shellQuote("${deployUser}@${deployHost}:${deployUploadDir}/")}
+                                    echo "Uploading \$artifact -> ${resolvedDeployUser}@${resolvedDeployHost}:${deployUploadDir}/"
+                                    scp "\${SCP_OPTIONS[@]}" "\$artifact" ${shellQuote("${resolvedDeployUser}@${resolvedDeployHost}:${deployUploadDir}/")}
                                   done
                                 """
                             }
@@ -407,11 +464,11 @@ ${deployCommand}
 """.trim()
 
                                 remoteSsh(
-                                    host: deployHost,
-                                    user: deployUser,
-                                    sshCredentialsId: deploySshCredId,
-                                    port: deployPort,
-                                    knownHost: deployKnownHost,
+                                    host: resolvedDeployHost,
+                                    user: resolvedDeployUser,
+                                    sshCredentialsId: resolvedDeploySshCredId,
+                                    port: resolvedDeployPort,
+                                    knownHost: resolvedDeployKnownHost,
                                     useSudo: deployUseSudo,
                                     strictHostKeyChecking: true,
                                     command: remoteDeployCommand
