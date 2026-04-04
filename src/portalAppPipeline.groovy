@@ -70,18 +70,21 @@ release_path="$release_dir/$artifact_name"
 release_link="$release_dir/portalApp.jar"
 backup_suffix="$(date +%Y%m%d%H%M%S)"
 
-mkdir -p "$release_dir"
+sudo mkdir -p "$release_dir"
+
+sudo chown "$USER":"$USER" -R "$release_dir"
+
 
 # 既存の旧版 JAR は、今回リリースするものを除いて退避しておく。
 find "$release_dir" -maxdepth 1 -type f -name 'portalApp-*.jar' ! -name "$artifact_name" -print | while read -r old_jar; do
-  mv "$old_jar" "$old_jar.bak_${backup_suffix}"
+  sudo mv "$old_jar" "$old_jar.bak_${backup_suffix}"
 done
 
-install -m 0644 "$artifact_path" "$release_path"
-rm -f "$release_link"
-ln -s "$release_path" "$release_link"
+sudo install -m 0644 "$artifact_path" "$release_path"
+sudo rm -f "$release_link"
+sudo ln -s "$release_path" "$release_link"
 
-systemctl restart portal
+sudo systemctl restart portal
 
 echo "Staged artifact: $DEPLOY_FIRST_ARTIFACT"
 echo "Released artifact: $release_path"
