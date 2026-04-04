@@ -57,14 +57,22 @@ k8sMavenNodePipeline(
   deployKnownHost: '35.160.162.206',
   deployTargetDir: '/opt/portal-app',
   deployUseSudo: true,
-  deployCommand: 'sudo systemctl restart portal',
+  deployCommand: '''
 # ここで本番配置や再起動を必要に応じて実行する。
 # 例:
 # install -D -m 0644 "$DEPLOY_FIRST_ARTIFACT" /opt/portal-app/portalApp.jar
 # systemctl restart portal
+rm -frv /opt/portal-app/portalApp.jar
+
+mv "$DEPLOY_TARGET_DIR"/portalApp-*.jar "$DEPLOY_TARGET_DIR"/portalApp-*.jar.bak_$(date +%Y%m%d%H%M%S)
+
+install -D -m 0644 "$DEPLOY_FIRST_ARTIFACT" /opt/portal-app/"$DEPLOY_FIRST_ARTIFACT"
+ln -s "$DEPLOY_TARGET_DIR"/"$DEPLOY_FIRST_ARTIFACT" /opt/portal-app/portalApp.jar
+
+systemctl restart portal
 
 echo "Uploaded artifact: $DEPLOY_FIRST_ARTIFACT"
-'''
+''',
 
   // 以下の設定は repositoryConfig.groovy から自動取得されます:
   // - gitSshCredentialsId

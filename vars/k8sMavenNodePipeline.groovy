@@ -46,7 +46,7 @@ def call(Map cfg = [:]) {
 
     // リモート配置設定。必要時だけ有効化し、通常のビルドでは何もしない。
     def enableRemoteDeploy = cfg.containsKey('enableRemoteDeploy') ? cfg.get('enableRemoteDeploy').toString().toBoolean() : false
-    def deployArtifactPattern = cfg.get('deployArtifactPattern', archivePattern ?: '**/target/*.war')?.toString()?.trim()
+    def deployArtifactPattern = cfg.get('deployArtifactPattern', archivePattern ?: '**/target/*.jar')?.toString()?.trim()
     def deployHost = cfg.get('deployHost', '')?.toString()?.trim()
     def deployUser = cfg.get('deployUser', '')?.toString()?.trim()
     def deployPort = (cfg.get('deployPort', 22) as Integer)
