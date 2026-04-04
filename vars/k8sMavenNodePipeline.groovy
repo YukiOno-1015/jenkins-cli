@@ -385,13 +385,13 @@ def call(Map cfg = [:]) {
                                     -o BatchMode=yes
                                     -o ConnectTimeout=10
                                     -o StrictHostKeyChecking=yes
-                                    -o UserKnownHostsFile=\"$HOME/.ssh/known_hosts\"
+                                    -o UserKnownHostsFile=\"\$HOME/.ssh/known_hosts\"
                                     -P ${deployPort}
                                   )
 
                                   for artifact in ${matchedArtifacts.collect { shellQuote(it) }.join(' ')}; do
-                                    echo "Uploading ${artifact} -> ${deployUser}@${deployHost}:${deployUploadDir}/"
-                                    scp "\${SCP_OPTIONS[@]}" "$artifact" ${shellQuote("${deployUser}@${deployHost}:${deployUploadDir}/")}
+                                    echo "Uploading \$artifact -> ${deployUser}@${deployHost}:${deployUploadDir}/"
+                                    scp "\${SCP_OPTIONS[@]}" "\$artifact" ${shellQuote("${deployUser}@${deployHost}:${deployUploadDir}/")}
                                   done
                                 """
                             }
