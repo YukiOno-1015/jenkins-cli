@@ -44,6 +44,7 @@ def TARGET_HOST_CHOICES = (['ALL'] + TARGET_HOSTS).join('\n')
 
 def SSH_USER = 'honoka'
 def MACOS_SSH_USER = 'yukiono'
+def DEFAULT_SSH_CREDENTIAL_ID = 'github-ssh'
 
 // macOS ホストは brew update/upgrade で更新する
 def MACOS_HOSTS = [
@@ -130,36 +131,54 @@ brew upgrade
 '''.trim()
 }
 
-def runSshAsRoot = { host, remoteScript ->
-    sh """
-        ssh -o StrictHostKeyChecking=no -o BatchMode=yes -A root@${host} 'bash -s' <<'REMOTE_SCRIPT'
-${remoteScript}
-REMOTE_SCRIPT
-    """
+def runWithSshCredentials = { sshCredentialsId, Closure body ->
+    def credentialId = sshCredentialsId?.toString()?.trim()
+    if (credentialId) {
+        sshagent(credentials: [credentialId]) {
+            body.call()
+        }
+        return
+    }
+
+    body.call()
 }
 
-def runSshWithSudo = { host, sshUser, remoteScript ->
-    sh """
-        ssh -o StrictHostKeyChecking=no -o BatchMode=yes -A ${sshUser}@${host} 'sudo -n bash -s' <<'REMOTE_SCRIPT'
+def runSshAsRoot = { host, remoteScript, sshCredentialsId ->
+    runWithSshCredentials(sshCredentialsId) {
+        sh """
+            ssh -o StrictHostKeyChecking=no -o BatchMode=yes -A root@${host} 'bash -s' <<'REMOTE_SCRIPT'
 ${remoteScript}
 REMOTE_SCRIPT
-    """
+        """
+    }
 }
 
-def runSshAsUser = { host, sshUser, remoteScript ->
-    sh """
-        ssh -o StrictHostKeyChecking=no -o BatchMode=yes -A ${sshUser}@${host} 'bash -s' <<'REMOTE_SCRIPT'
+def runSshWithSudo = { host, sshUser, remoteScript, sshCredentialsId ->
+    runWithSshCredentials(sshCredentialsId) {
+        sh """
+            ssh -o StrictHostKeyChecking=no -o BatchMode=yes -A ${sshUser}@${host} 'sudo -n bash -s' <<'REMOTE_SCRIPT'
 ${remoteScript}
 REMOTE_SCRIPT
-    """
+        """
+    }
+}
+
+def runSshAsUser = { host, sshUser, remoteScript, sshCredentialsId ->
+    runWithSshCredentials(sshCredentialsId) {
+        sh """
+            ssh -o StrictHostKeyChecking=no -o BatchMode=yes -A ${sshUser}@${host} 'bash -s' <<'REMOTE_SCRIPT'
+${remoteScript}
+REMOTE_SCRIPT
+        """
+    }
 }
 
 // ホスト種別に応じて適切な SSH 実行方式と更新コマンドを選択する。
-def runUpdateOnHost = { host, sshUser, macOsSshUser, aptExpiredMetadataWorkaroundHosts ->
+def runUpdateOnHost = { host, sshUser, macOsSshUser, aptExpiredMetadataWorkaroundHosts, sshCredentialsId ->
     echo "==== Updating ${host} ===="
 
     if (MACOS_HOSTS.contains(host)) {
-        runSshAsUser(host, macOsSshUser, buildMacOsUpdateCommand())
+        runSshAsUser(host, macOsSshUser, buildMacOsUpdateCommand(), sshCredentialsId)
         return
     }
 
@@ -167,11 +186,11 @@ def runUpdateOnHost = { host, sshUser, macOsSshUser, aptExpiredMetadataWorkaroun
     def remoteScript = buildUpdateCommand(useWorkaround)
 
     if (ROOT_LOGIN_HOSTS.contains(host)) {
-        runSshAsRoot(host, remoteScript)
+        runSshAsRoot(host, remoteScript, sshCredentialsId)
         return
     }
 
-    runSshWithSudo(host, sshUser, remoteScript)
+    runSshWithSudo(host, sshUser, remoteScript, sshCredentialsId)
 }
 
 pipeline {
@@ -183,6 +202,7 @@ pipeline {
 
     parameters {
         choice(name: 'TARGET_HOST', choices: TARGET_HOST_CHOICES, description: '更新対象ホストを選択（ALL で全ホスト実行）')
+        string(name: 'SSH_CREDENTIALS_ID', defaultValue: DEFAULT_SSH_CREDENTIAL_ID, description: 'SSH接続に使う Jenkins Credential ID（空欄ならsshagentを使わず実行）')
     }
 
     options {
@@ -195,8 +215,10 @@ pipeline {
                 script {
                     def failedHosts = []
                     def targetHosts = params.TARGET_HOST == 'ALL' ? TARGET_HOSTS : [params.TARGET_HOST]
+                    def sshCredentialsId = params.SSH_CREDENTIALS_ID?.toString()?.trim()
 
                     echo "Target hosts: ${targetHosts.join(', ')}"
+                    echo "SSH credentials: ${sshCredentialsId ?: 'not specified (without sshagent)'}"
 
                     for (host in targetHosts) {
                         try {
@@ -204,7 +226,8 @@ pipeline {
                                 host,
                                 SSH_USER,
                                 MACOS_SSH_USER,
-                                APT_EXPIRED_METADATA_WORKAROUND_HOSTS
+                                APT_EXPIRED_METADATA_WORKAROUND_HOSTS,
+                                sshCredentialsId
                             )
                             echo "[OK] ${host}"
                         } catch (Exception e) {
