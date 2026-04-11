@@ -24,6 +24,7 @@ def PROXMOX_HOSTS = [
 
 def SLACK_WEBHOOK_CREDENTIAL_ID = 'slack-webhook-url'
 def DISCORD_WEBHOOK_CREDENTIAL_ID = 'discord-webhook-url'
+def DEFAULT_SSH_CREDENTIAL_ID = 'github-ssh'
 
 def proxmoxHostResults = []
 
@@ -235,14 +236,18 @@ fi
 }
 
 def runRemoteScript = { host, remoteScript ->
-    return sh(
-        script: """
-            ssh -o StrictHostKeyChecking=no -o BatchMode=yes -A root@${host} 'bash -s' <<'REMOTE_SCRIPT'
+    def sshCredentialsId = params.SSH_CREDENTIALS_ID?.toString()?.trim() ?: DEFAULT_SSH_CREDENTIAL_ID
+
+    sshagent(credentials: [sshCredentialsId]) {
+        return sh(
+            script: """
+                ssh -o StrictHostKeyChecking=no -o BatchMode=yes -o ConnectTimeout=10 root@${host} 'bash -s' <<'REMOTE_SCRIPT'
 ${remoteScript}
 REMOTE_SCRIPT
-        """,
-        returnStdout: true
-    ).trim()
+            """,
+            returnStdout: true
+        ).trim()
+    }
 }
 
 @NonCPS
@@ -328,6 +333,7 @@ pipeline {
         booleanParam(name: 'TEST_NOTIFICATIONS_ONLY', defaultValue: false, description: 'true の場合は Slack/Discord 通知テストのみを実行し、監視や更新は行わない')
         booleanParam(name: 'APPLY_UPDATES', defaultValue: false, description: 'true の場合のみ Proxmox ホストへ full-upgrade を実行する')
         booleanParam(name: 'ALLOW_REBOOT', defaultValue: false, description: 'reboot required 時に自動再起動する')
+        string(name: 'SSH_CREDENTIALS_ID', defaultValue: DEFAULT_SSH_CREDENTIAL_ID, description: 'Proxmox ホストへ SSH 接続する Jenkins Credential ID（sshUserPrivateKey）')
     }
 
     options {
