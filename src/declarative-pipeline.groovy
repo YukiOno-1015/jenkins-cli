@@ -1,11 +1,12 @@
 /*
- * Cloudflare WAF allowlist を、現在の Jenkins 実行ノードのグローバル IP に追従させる
- * Declarative Pipeline です。
+ * Cloudflare WAF の `allowlist` ルールを、指定ホスト群に対して現在の Jenkins 実行ノードの
+ * グローバル IP を許可する Declarative Pipeline です。
  *
  * このジョブの役割:
  * - 外向き IP を取得して前回値と比較する
- * - 変更があったときだけ Cloudflare Ruleset を更新する
+ * - IP 変更時のみ Cloudflare Ruleset の `allowlist` 条件を更新する
  * - 直前 IP も一時的に許可対象へ残し、切り替え時の瞬断を避ける
+ * - 対象ホストは `RULE_DEFS` の `hosts` 配列で管理する
  *
  * 必要な Jenkins Credentials（Kind: Secret text）:
  *   CF_API_TOKEN : Cloudflare API Token（Zone.Firewall Services - Edit 権限）
@@ -18,10 +19,17 @@
  */
 
 // ---- 更新対象ルール定義 ----------------------------------------
-// desc と hostname は 1:1 で対応させること
+// Cloudflare 側の description と対象 host 群をここで管理する
 def RULE_DEFS = [
-    [desc: 'allowlist-jenkins-svc', hostname: 'jenkins-cli.sk4869.info'],
-    [desc: 'allowlist-sonar',       hostname: 'sonar-cli.sk4869.info'],
+    [
+        desc: 'allowlist',
+        hosts: [
+            'zabbix-cli.sk4869.info',
+            'sonarqube-cli.sk4869.info',
+            'jenkins-cli.sk4869.info',
+            'pv-svc.sk4869.info',
+        ],
+    ],
 ]
 // ---------------------------------------------------------------
 
@@ -143,14 +151,35 @@ pipeline {
 
                         // 2. 各ルールを更新
                         int updatedCount = 0
+                        int matchedCount = 0
                         for (def ruleDef in RULE_DEFS) {
                             def rule = rulesetRes.body.result.rules.find { it.description == ruleDef.desc }
                             if (!rule) {
                                 echo "WARNING: rule not found by description '${ruleDef.desc}' — skipped"
                                 continue
                             }
+                            matchedCount++
 
-                            def newExpr = "(http.host eq \"${ruleDef.hostname}\" and not ip.src in {${env.CURRENT_IP} ${env.PREV_IP}})"
+                            def hostValues = ruleDef.hosts ?: (ruleDef.hostname ? [ruleDef.hostname] : [])
+                            if (!hostValues) {
+                                echo "WARNING: no host configuration found for '${ruleDef.desc}' — skipped"
+                                continue
+                            }
+
+                            def allowedIps = (ruleDef.allowedIps ?: [env.CURRENT_IP, env.PREV_IP]).findAll { it?.trim() }
+                            if (!allowedIps) {
+                                echo "WARNING: no allowed IPs configured for '${ruleDef.desc}' — skipped"
+                                continue
+                            }
+
+                            def hostExpr = hostValues.collect { "\"${it}\"" }.join(' ')
+                            def ipExpr = allowedIps.join(' ')
+                            def newExpr = "(not ip.src in {${ipExpr}} and http.host in {${hostExpr}})"
+
+                            if ((rule.expression ?: '').trim() == newExpr) {
+                                echo "Rule already up to date: ${ruleDef.desc}"
+                                continue
+                            }
 
                             // 既存ルール定義をベースに expression のみ差し替え
                             def patchMap = [
@@ -177,13 +206,13 @@ pipeline {
                             }
                         }
 
-                        if (updatedCount == 0) {
-                            error('No rules were updated — check rule descriptions in Cloudflare')
+                        if (matchedCount == 0) {
+                            error('No rules were matched — check rule descriptions in Cloudflare')
                         }
 
                         // 3. 現在 IP をステートに保存
                         sh "echo '${env.CURRENT_IP}' > '${env.STATE_FILE}'"
-                        echo "Updated ${updatedCount} rule(s): current=${env.CURRENT_IP} prev=${env.PREV_IP}"
+                        echo "Allowlist sync finished: updated=${updatedCount}, matched=${matchedCount}, current=${env.CURRENT_IP}, prev=${env.PREV_IP}"
                     }
                 }
             }
