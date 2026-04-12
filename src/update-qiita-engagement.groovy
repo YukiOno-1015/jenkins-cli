@@ -138,35 +138,34 @@ spec:
 
                     def targets = []
                     withCredentials([string(credentialsId: qiitaConfig.credentialId, variable: 'QIITA_TOKEN')]) {
-                        for (int page = 1; page <= qiitaConfig.maxPages; page++) {
-                            def res = qiitaGet("/items?page=${page}&per_page=${qiitaConfig.perPage}")
-                            if (res.code != 200) {
-                                error("Failed to fetch items: HTTP ${res.code}\n${res.raw}")
-                            }
-
-                            def items = (res.body instanceof List) ? res.body : []
-                            if (items.isEmpty()) {
-                                break
-                            }
-
-                            for (def item in items) {
-                                def org = (item.organization_url_name ?: '').toString()
-                                if (!qiitaConfig.organizations.contains(org)) {
-                                    continue
+                        // organization ごとに API レベルで絞り込んで取得する（全件取得→ローカルフィルタより効率的）
+                        for (def orgName in qiitaConfig.organizations) {
+                            for (int page = 1; page <= qiitaConfig.maxPages; page++) {
+                                def encodedOrg = java.net.URLEncoder.encode("organization:${orgName}", 'UTF-8')
+                                def res = qiitaGet("/items?query=${encodedOrg}&page=${page}&per_page=${qiitaConfig.perPage}")
+                                if (res.code != 200) {
+                                    error("Failed to fetch items for org '${orgName}': HTTP ${res.code}\n${res.raw}")
                                 }
 
-                                def itemId = (item.id ?: '').toString()
-                                if (!itemId || existingSet.contains(itemId)) {
-                                    continue
+                                def items = (res.body instanceof List) ? res.body : []
+                                if (items.isEmpty()) {
+                                    break
                                 }
 
-                                targets << [
-                                    id: itemId,
-                                    title: (item.title ?: '').toString(),
-                                    url: (item.url ?: '').toString(),
-                                    org: org,
-                                    createdAt: (item.created_at ?: '').toString(),
-                                ]
+                                for (def item in items) {
+                                    def itemId = (item.id ?: '').toString()
+                                    if (!itemId || existingSet.contains(itemId)) {
+                                        continue
+                                    }
+
+                                    targets << [
+                                        id: itemId,
+                                        title: (item.title ?: '').toString(),
+                                        url: (item.url ?: '').toString(),
+                                        org: orgName,
+                                        createdAt: (item.created_at ?: '').toString(),
+                                    ]
+                                }
                             }
                         }
 
