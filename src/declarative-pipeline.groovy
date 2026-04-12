@@ -95,6 +95,13 @@ pipeline {
                             error("Zone access verification failed: HTTP ${zoneRes.code}\n${zoneRes.raw}\nCheck token scopes (Zone.Firewall Services:Edit) and CF_ZONE_ID.")
                         }
                         echo "Zone access OK: ${zoneRes.body.result?.name ?: 'unknown'}"
+
+                        echo '=== Verifying Ruleset Access ==='
+                        def rulesetAccessRes = cfGetByPath('/zones/$CF_ZONE_ID/rulesets/phases/http_request_firewall_custom/entrypoint')
+                        if (rulesetAccessRes.code != 200) {
+                            error("Ruleset access verification failed: HTTP ${rulesetAccessRes.code}\n${rulesetAccessRes.raw}\nToken can read zone but cannot access rulesets API. Check Zone WAF/Rulesets permissions and zone include settings.")
+                        }
+                        echo 'Ruleset access OK'
                     }
                 }
             }
@@ -198,8 +205,8 @@ pipeline {
                                 patchMap.action_parameters = rule.action_parameters
                             }
 
-                            def patchRes = cfPatch(
-                                "${env.CF_API_BASE}/zones/$CF_ZONE_ID/rulesets/${rulesetId}/rules/${rule.id}",
+                            def patchRes = cfPatchByPath(
+                                "/zones/\$CF_ZONE_ID/rulesets/${rulesetId}/rules/${rule.id}",
                                 patchMap
                             )
 
@@ -276,6 +283,11 @@ def cfPatch(String url, Map bodyMap) {
 
     sh "rm -f '${tmpFile}'"
     return parseResponse(raw)
+}
+
+/** API パス（例: /zones/$CF_ZONE_ID/...）へ PATCH リクエスト */
+def cfPatchByPath(String apiPath, Map bodyMap) {
+    return cfPatch("${env.CF_API_BASE}${apiPath}", bodyMap)
 }
 
 /** curl レスポンス（本文 + ステータスコード）をパース */
