@@ -1,4 +1,5 @@
 import groovy.json.JsonSlurperClassic
+import groovy.transform.Field
 
 /*
  * ============================================================
@@ -30,7 +31,7 @@ import groovy.json.JsonSlurperClassic
  *   - 一部失敗時は UNSTABLE 扱い
  */
 
-def qiitaConfig = [:]
+@Field def qiitaConfig = [:]
 
 pipeline {
     agent {
