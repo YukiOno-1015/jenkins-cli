@@ -34,8 +34,17 @@ def RULE_DEFS = [
 // ---------------------------------------------------------------
 
 pipeline {
-    agent { label 'machost' }
+    agent {
+        docker {
+            image 'honoka4869/jenkins-maven-node:latest'
+            label 'machost'
+            reuseNode true
+        }
+    }
     triggers { cron('TZ=Asia/Tokyo\nH/10 * * * *') }
+    parameters {
+        string(name: 'STATE_FILE_PATH', defaultValue: '', description: '前回IP保存先。空欄時はデフォルト（$HOME/.cf-allowlist/prev_ip.txt）を利用')
+    }
     options {
         skipDefaultCheckout(true)
         timestamps()
@@ -127,10 +136,14 @@ pipeline {
         stage('Check IP Change') {
             steps {
                 script {
-                    sh "mkdir -p '${env.STATE_DIR}'"
+                    def stateFile = (params.STATE_FILE_PATH ?: '').trim() ?: env.STATE_FILE
+                    def stateDir = sh(script: "dirname '${stateFile}'", returnStdout: true).trim()
+                    sh "mkdir -p '${stateDir}'"
+                    env.STATE_FILE_EFFECTIVE = stateFile
+                    echo "Using state file: ${env.STATE_FILE_EFFECTIVE}"
 
                     def prevIp = sh(
-                        script: "cat '${env.STATE_FILE}' 2>/dev/null || true",
+                        script: "cat '${env.STATE_FILE_EFFECTIVE}' 2>/dev/null || true",
                         returnStdout: true
                     ).trim()
 
@@ -224,7 +237,8 @@ pipeline {
                         }
 
                         // 3. 現在 IP をステートに保存
-                        sh "echo '${env.CURRENT_IP}' > '${env.STATE_FILE}'"
+                        def stateFile = (env.STATE_FILE_EFFECTIVE ?: env.STATE_FILE).trim()
+                        sh "echo '${env.CURRENT_IP}' > '${stateFile}'"
                         echo "Allowlist sync finished: updated=${updatedCount}, matched=${matchedCount}, current=${env.CURRENT_IP}, prev=${env.PREV_IP}"
                     }
                 }
