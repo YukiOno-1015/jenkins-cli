@@ -1,66 +1,41 @@
-# Qiita プロファイル共有 API 連携仕様
+# Qiita フォロー同期ジョブ仕様
 
-`src/sync-qiita-profile-share.groovy` から送信する JSON 仕様です。
+`src/sync-qiita-profile-share.groovy` の実行仕様です。
 
-## 送信先
+## 目的
 
-- パラメータ: `SHARE_API_URL`
-- メソッド: `POST`
-- ヘッダ:
-  - `Content-Type: application/json`
-  - `Authorization: Bearer <token>`（`SHARE_API_TOKEN_CREDENTIAL_ID` を設定した場合のみ）
+- 3アカウント（または複数アカウント）のフォロー中ユーザー一覧を統合し、各アカウントへ不足分を反映する
+- 3アカウント（または複数アカウント）のフォロー中タグ一覧を統合し、各アカウントへ不足分を反映する
 
-## ペイロード例
+## 同期の動作
 
-```json
-{
-  "source": "jenkins-qiita-profile-share",
-  "generatedAt": "2026-04-12T17:30:00+09:00",
-  "accountCount": 2,
-  "accounts": [
-    {
-      "credentialId": "jqit-qiita-access-token",
-      "userId": "example-user-a",
-      "followees": [
-        {
-          "id": "followee-1",
-          "name": "Followee Name",
-          "profile": "https://qiita-image-store.s3..."
-        }
-      ],
-      "followingTags": [
-        {
-          "id": "jenkins",
-          "iconUrl": "https://...",
-          "items": 1234
-        }
-      ],
-      "questions": [
-        {
-          "id": "q-xxxx",
-          "title": "質問タイトル",
-          "url": "https://qiita.com/...",
-          "createdAt": "2026-04-01T12:00:00+09:00"
-        }
-      ]
-    }
-  ]
-}
-```
+- 各アカウントで次を収集:
+  - `/authenticated_user/followees`
+  - `/authenticated_user/following_tags`
+- 全アカウントの和集合（union）を作成
+- 各アカウントについて、自分に不足しているユーザー/タグのみを追加フォロー
+- 自分自身の userId はフォロー対象から除外
 
-## ステータスコードの推奨
+## 主要パラメータ
 
-- `200` / `201`: 受信成功
-- `400`: JSON 形式や必須項目不正
-- `401` / `403`: API 認証エラー
-- `500`: サーバー内部エラー
+- `QIITA_TOKEN_CREDENTIAL_IDS`: 同期対象の Credential ID（カンマ区切り）
+- `HTTP_TIMEOUT_SEC`: Qiita API タイムアウト秒
+- `HTTP_RETRY_COUNT`: Qiita API リトライ回数
+- `MAX_PAGE_COUNT`: ページング取得上限
+- `DRY_RUN`: true の場合は反映せず、差分ログのみ
 
-## 備考
+## エンドポイント備考
 
-- 収集時に無効な Qiita トークンは自動スキップされます。
-- 有効アカウントが 0 件の場合はジョブ失敗になります。
-- `DRY_RUN=true`（既定値）の場合は送信せず、収集のみ行います。
-- `DRY_RUN=false` で共有送信する場合は `SHARE_API_URL` の設定が必須です。
+Qiita API の差異に備え、フォロー更新は候補パスを順に試行します。
+
+- ユーザーフォロー: `/users/:id/following` → `/users/:id/follow`
+- タグフォロー: `/tags/:id/following` → `/tags/:id/follow`
+
+## 実行結果
+
+- すべて成功: `SUCCESS`
+- 一部失敗あり: `UNSTABLE`
+- 有効アカウントが0件: `FAILURE`
 
 ## 定期実行
 
