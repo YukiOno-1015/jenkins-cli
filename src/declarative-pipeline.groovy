@@ -35,10 +35,19 @@ def RULE_DEFS = [
 
 pipeline {
     agent {
-        docker {
-            image 'honoka4869/jenkins-maven-node:latest'
-            label 'machost'
-            reuseNode true
+        kubernetes {
+            defaultContainer 'main'
+            yaml '''
+apiVersion: v1
+kind: Pod
+spec:
+  containers:
+  - name: main
+    image: honoka4869/jenkins-maven-node:latest
+    command:
+    - cat
+    tty: true
+'''
         }
     }
     triggers { cron('TZ=Asia/Tokyo\nH/10 * * * *') }
