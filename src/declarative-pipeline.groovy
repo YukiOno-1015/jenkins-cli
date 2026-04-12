@@ -206,7 +206,7 @@ pipeline {
                             }
 
                             def patchRes = cfPatchByPath(
-                                "/zones/\$CF_ZONE_ID/rulesets/${rulesetId}/rules/${rule.id}",
+                                "/zones/${env.CF_ZONE_ID}/rulesets/${rulesetId}/rules/${rule.id}",
                                 patchMap
                             )
 
