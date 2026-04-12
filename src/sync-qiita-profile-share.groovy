@@ -240,9 +240,11 @@ spec:
                                     continue
                                 }
 
+                                // タグIDに '#' 等が含まれる場合はURLエンコードが必要（例: C#→C%23）
+                                def encodedTagId = URLEncoder.encode(tagId, 'UTF-8')
                                 def res = qiitaPutWithFallback(cfg, [
-                                    "/tags/${tagId}/following",
-                                    "/tags/${tagId}/follow"
+                                    "/tags/${encodedTagId}/following",
+                                    "/tags/${encodedTagId}/follow"
                                 ])
 
                                 if (qiitaEngagementUtils.isSuccessCode(res.code) || res.code == 409) {
