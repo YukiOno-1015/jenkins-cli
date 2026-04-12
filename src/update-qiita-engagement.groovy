@@ -229,20 +229,34 @@ spec:
         stage('Verify Qiita Token') {
             steps {
                 script {
-                    for (String credentialId : qiitaConfig.credentialIds) {
-                        withCredentials([string(credentialsId: credentialId, variable: 'QIITA_TOKEN')]) {
-                            /*
-                             * /authenticated_user で token の有効性と権限を確認。
-                             */
-                            def whoami = qiitaEngagementUtils.qiitaGet(qiitaConfig, env.QIITA_API_BASE, '/authenticated_user')
-                            if (whoami.code != 200) {
-                                error("Qiita トークン検証に失敗しました: credentialId=${credentialId}, HTTP ${whoami.code}\n${whoami.rawBody}")
-                            }
+                    def activeCredentialIds = []
 
-                            def userId = (whoami.body instanceof Map) ? (whoami.body.id ?: 'unknown') : 'unknown'
-                            echo "認証ユーザー: credentialId=${credentialId}, user=${userId}"
+                    for (String credentialId : qiitaConfig.credentialIds) {
+                        try {
+                            withCredentials([string(credentialsId: credentialId, variable: 'QIITA_TOKEN')]) {
+                                /*
+                                 * /authenticated_user で token の有効性と権限を確認。
+                                 */
+                                def whoami = qiitaEngagementUtils.qiitaGet(qiitaConfig, env.QIITA_API_BASE, '/authenticated_user')
+                                if (whoami.code != 200) {
+                                    echo "[WARN] Qiita トークン検証に失敗したためスキップします: credentialId=${credentialId}, HTTP=${whoami.code}, body=${qiitaEngagementUtils.trimForLog(whoami.rawBody)}"
+                                } else {
+                                    def userId = (whoami.body instanceof Map) ? (whoami.body.id ?: 'unknown') : 'unknown'
+                                    echo "認証ユーザー: credentialId=${credentialId}, user=${userId}"
+                                    activeCredentialIds << credentialId
+                                }
+                            }
+                        } catch (Exception ex) {
+                            echo "[WARN] Credential の読み込みまたは検証に失敗したためスキップします: credentialId=${credentialId}, reason=${ex.message}"
                         }
                     }
+
+                    if (activeCredentialIds.isEmpty()) {
+                        error('有効な Qiita トークンが1件もありません。Credential 設定を確認してください。')
+                    }
+
+                    qiitaConfig.activeCredentialIds = activeCredentialIds
+                    echo "有効 Credential IDs: ${qiitaConfig.activeCredentialIds.join(', ')}"
                 }
             }
         }
@@ -264,7 +278,7 @@ spec:
 
                     def targets = []
 
-                    def readerCredentialId = qiitaConfig.credentialIds[0]
+                    def readerCredentialId = qiitaConfig.activeCredentialIds[0]
 
                     withCredentials([string(credentialsId: readerCredentialId, variable: 'QIITA_TOKEN')]) {
                         /*
@@ -338,7 +352,7 @@ spec:
                         int skippedCount  = 0
                         def processedKeys = []
 
-                        for (String credentialId : qiitaConfig.credentialIds) {
+                        for (String credentialId : qiitaConfig.activeCredentialIds) {
                             withCredentials([string(credentialsId: credentialId, variable: 'QIITA_TOKEN')]) {
                                 echo "[INFO] いいね/ストック実行中: credentialId=${credentialId}"
 
