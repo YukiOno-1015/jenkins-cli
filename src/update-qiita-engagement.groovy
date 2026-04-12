@@ -1,4 +1,5 @@
 import groovy.transform.Field
+import com.cloudbees.groovy.cps.NonCPS
 
 /*
  * ============================================================
@@ -299,10 +300,7 @@ spec:
                          * 同一 item_id は重複排除。
                          * created_at 昇順で古いものから処理。
                          */
-                        targets = targets
-                            .findAll { !(it.privateFlg == true) }
-                            .unique { it.id }
-                            .sort { a, b -> (a.createdAt ?: '') <=> (b.createdAt ?: '') }
+                        targets = normalizeTargets(targets)
 
                         if (targets.isEmpty()) {
                             echo 'No new public organization posts detected.'
@@ -386,10 +384,7 @@ spec:
                         merged.addAll(processedIds)
                         merged.addAll(existingIds)
 
-                        merged = merged.findAll { it?.toString()?.trim() }
-                                       .collect { it.toString().trim() }
-                                       .unique()
-                                       .take(qiitaConfig.maxStateIds)
+                        merged = normalizeStateIds(merged, qiitaConfig.maxStateIds)
 
                         saveStateIds(qiitaConfig.stateFile, merged)
 
@@ -452,6 +447,68 @@ def parseCsv(String raw) {
         .collect { it.trim() }
         .findAll { it }
         .unique()
+}
+
+/*
+ * CPS ミスマッチ回避のため、target 一覧の整形を NonCPS で実施する。
+ * - private 記事を除外
+ * - item_id で重複排除
+ * - createdAt 昇順
+ */
+@NonCPS
+def normalizeTargets(List rawTargets) {
+    def result = []
+    def seen = [] as Set
+
+    for (def t : (rawTargets ?: [])) {
+        if (!(t instanceof Map)) {
+            continue
+        }
+        if (t.privateFlg == true) {
+            continue
+        }
+
+        def id = (t.id ?: '').toString().trim()
+        if (!id || seen.contains(id)) {
+            continue
+        }
+
+        seen << id
+        result << t
+    }
+
+    result.sort { a, b ->
+        def aCreated = (a.createdAt ?: '').toString()
+        def bCreated = (b.createdAt ?: '').toString()
+        aCreated <=> bCreated
+    }
+
+    return result
+}
+
+/*
+ * state ID 一覧を正規化する（空除去・trim・重複排除・上限件数適用）。
+ */
+@NonCPS
+def normalizeStateIds(List rawIds, int maxSize) {
+    def result = []
+    def seen = [] as Set
+
+    for (def idRaw : (rawIds ?: [])) {
+        def id = (idRaw ?: '').toString().trim()
+        if (!id || seen.contains(id)) {
+            continue
+        }
+
+        seen << id
+        result << id
+
+        if (result.size() >= maxSize) {
+            break
+        }
+    }
+
+    return result
 }
 
 /*
