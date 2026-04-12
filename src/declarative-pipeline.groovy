@@ -172,9 +172,10 @@ pipeline {
                                 continue
                             }
 
-                            def hostExpr = hostValues.collect { "\"${it}\"" }.join(' ')
+                            // hosts に一致した場合のみ IP 制限を適用する（他ドメインへの影響を避ける）
+                            def hostExpr = hostValues.collect { "http.host eq \"${it}\"" }.join(' or ')
                             def ipExpr = allowedIps.join(' ')
-                            def newExpr = "(not ip.src in {${ipExpr}} and http.host in {${hostExpr}})"
+                            def newExpr = "((${hostExpr}) and not ip.src in {${ipExpr}})"
 
                             if ((rule.expression ?: '').trim() == newExpr) {
                                 echo "Rule already up to date: ${ruleDef.desc}"
