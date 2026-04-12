@@ -42,6 +42,10 @@
 - `qiita-access-token` (Secret text)
   - 必須スコープ: `read_qiita`, `write_qiita`
   - 通常 Qiita の記事を対象にする場合に利用
+- `STATE_FILE_PATH` (Jenkins パラメータ)
+  - 処理済み記事IDの保存先を指定
+  - コンテナAgent運用時は永続ボリューム（PVC など）のマウント先を指定する
+  - 例: `/data/qiita-auto-engagement/processed_item_ids.txt`
 
 ## 運用上の設計原則
 

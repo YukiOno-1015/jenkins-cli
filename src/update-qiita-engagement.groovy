@@ -4,7 +4,7 @@
  *
  * 運用方針:
  * - 監視対象は `organization_url_name` でフィルタする
- * - 処理済み記事IDをローカル state に保存し、重複実行を避ける
+ * - 処理済み記事IDを state に保存し、重複実行を避ける
  * - DRY_RUN=true で API 書き込みを行わず、対象抽出のみ検証できる
  *
  * 必要な Jenkins Credentials（Kind: Secret text）:
@@ -31,6 +31,7 @@ pipeline {
         booleanParam(name: 'DRY_RUN', defaultValue: false, description: 'true の場合、実 API 更新をせず対象抽出のみ行う')
         string(name: 'PER_PAGE', defaultValue: '50', description: '1ページ取得件数（1-100）')
         string(name: 'MAX_PAGES', defaultValue: '3', description: '取得ページ上限（1-100）')
+        string(name: 'STATE_FILE_PATH', defaultValue: '', description: '処理済み記事IDの保存先。空欄時は $HOME/.qiita-auto-engagement/processed_item_ids.txt を利用')
         string(name: 'QIITA_TOKEN_CREDENTIAL_ID', defaultValue: 'qiita-access-token', description: 'Qiita API Token の Jenkins Credential ID')
     }
 
@@ -87,6 +88,12 @@ pipeline {
 
                     int perPage = toBoundedInt(params.PER_PAGE, 50, 1, 100)
                     int maxPages = toBoundedInt(params.MAX_PAGES, 3, 1, 100)
+                    def defaultStateFile = "${env.HOME}/.qiita-auto-engagement/processed_item_ids.txt"
+                    def stateFilePath = (params.STATE_FILE_PATH ?: '').trim() ?: defaultStateFile
+                    def stateDirPath = sh(
+                        script: "dirname '${stateFilePath}'",
+                        returnStdout: true
+                    ).trim()
 
                     qiitaConfig = [
                         organizations: organizations,
@@ -95,6 +102,8 @@ pipeline {
                         dryRun: params.DRY_RUN,
                         perPage: perPage,
                         maxPages: maxPages,
+                        stateFile: stateFilePath,
+                        stateDir: stateDirPath,
                         credentialId: (params.QIITA_TOKEN_CREDENTIAL_ID ?: '').trim(),
                     ]
 
@@ -105,6 +114,7 @@ pipeline {
                     echo "Organizations: ${qiitaConfig.organizations.join(', ')}"
                     echo "Actions: like=${qiitaConfig.doLike}, stock=${qiitaConfig.doStock}, dryRun=${qiitaConfig.dryRun}"
                     echo "Paging: perPage=${qiitaConfig.perPage}, maxPages=${qiitaConfig.maxPages}"
+                    echo "State file: ${qiitaConfig.stateFile}"
                     echo "Credential: ${qiitaConfig.credentialId}"
                 }
             }
@@ -127,8 +137,8 @@ pipeline {
         stage('Monitor & Engage') {
             steps {
                 script {
-                    sh "mkdir -p '${env.STATE_DIR}'"
-                    def stateText = sh(script: "cat '${env.STATE_FILE}' 2>/dev/null || true", returnStdout: true).trim()
+                    sh "mkdir -p '${qiitaConfig.stateDir}'"
+                    def stateText = sh(script: "cat '${qiitaConfig.stateFile}' 2>/dev/null || true", returnStdout: true).trim()
                     def existingIds = stateText ? stateText.readLines().collect { it.trim() }.findAll { it } : []
                     def existingSet = existingIds as Set
 
@@ -225,7 +235,7 @@ pipeline {
                         merged.addAll(existingIds)
                         merged = merged.findAll { it }.unique().take(toBoundedInt(env.MAX_STATE_IDS, 5000, 100, 20000))
 
-                        writeFile(file: env.STATE_FILE, text: merged.join('\n') + (merged.isEmpty() ? '' : '\n'))
+                        writeFile(file: qiitaConfig.stateFile, text: merged.join('\n') + (merged.isEmpty() ? '' : '\n'))
 
                         echo "Summary: targets=${targets.size()}, liked=${likedCount}, stocked=${stockedCount}, failed=${failedCount}, stateSize=${merged.size()}"
 
