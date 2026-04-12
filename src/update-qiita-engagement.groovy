@@ -344,6 +344,10 @@ spec:
                                         likeOk = true
                                         skippedCount++
                                         echo "[INFO] Like already exists or conflict treated as success: ${target.id}"
+                                    } else if (isAlreadyLikeResponse(likeRes)) {
+                                        likeOk = true
+                                        skippedCount++
+                                        echo "[INFO] Like already exists (403 already_liked) treated as success: ${target.id}"
                                     } else {
                                         likeOk = false
                                         echo "[WARN] Like failed: id=${target.id}, HTTP=${likeRes.code}, body=${trimForLog(likeRes.rawBody)}"
@@ -359,6 +363,10 @@ spec:
                                         stockOk = true
                                         skippedCount++
                                         echo "[INFO] Stock already exists or conflict treated as success: ${target.id}"
+                                    } else if (isAlreadyStockResponse(stockRes)) {
+                                        stockOk = true
+                                        skippedCount++
+                                        echo "[INFO] Stock already exists (403 already_stocked) treated as success: ${target.id}"
                                     } else {
                                         stockOk = false
                                         echo "[WARN] Stock failed: id=${target.id}, HTTP=${stockRes.code}, body=${trimForLog(stockRes.rawBody)}"
@@ -789,4 +797,30 @@ def parseBody(String bodyText) {
  */
 def isSuccessCode(int code) {
     return [200, 201, 204].contains(code)
+}
+
+/*
+ * Qiita は既に like 済みの場合に 403 + type=already_liked を返す。
+ * 冪等実行のため成功扱いにする。
+ */
+def isAlreadyLikeResponse(def res) {
+    if ((res?.code ?: 0) != 403) {
+        return false
+    }
+
+    def bodyType = (res?.body instanceof Map) ? (res.body.type ?: '').toString() : ''
+    return bodyType == 'already_liked'
+}
+
+/*
+ * Qiita は既に stock 済みの場合に 403 + type=already_stocked を返す。
+ * 冪等実行のため成功扱いにする。
+ */
+def isAlreadyStockResponse(def res) {
+    if ((res?.code ?: 0) != 403) {
+        return false
+    }
+
+    def bodyType = (res?.body instanceof Map) ? (res.body.type ?: '').toString() : ''
+    return bodyType == 'already_stocked'
 }
