@@ -13,6 +13,10 @@
   - クラスタ時は quorum を確認してから更新
 - `src/declarative-pipeline.groovy`
   - Jenkins 実行ノードのグローバル IP をもとに Cloudflare allowlist を更新
+- `src/update-qiita-engagement.groovy`
+  - Qiita の Organization 投稿を定期監視
+  - 新着記事へ自動で「いいね」「ストック」を付与
+  - 処理済み記事IDを state ファイルへ保存して重複処理を防止
 
 ## 実行基盤
 
@@ -32,6 +36,12 @@
 
 - `CF_API_TOKEN` (Secret text)
 - `CF_ZONE_ID` (Secret text)
+
+### Qiita 自動エンゲージメント
+
+- `qiita-access-token` (Secret text)
+  - 必須スコープ: `read_qiita`, `write_qiita`
+  - 通常 Qiita の記事を対象にする場合に利用
 
 ## 運用上の設計原則
 
