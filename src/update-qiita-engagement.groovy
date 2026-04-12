@@ -60,28 +60,7 @@ spec:
     stages {
         stage('Checkout SCM') {
             steps {
-                script {
-                    int maxAttempts = 3
-                    int checkoutTimeoutMinutes = 10
-                    int retryWaitSeconds = 15
-
-                    for (int attempt = 1; attempt <= maxAttempts; attempt++) {
-                        try {
-                            timeout(time: checkoutTimeoutMinutes, unit: 'MINUTES') {
-                                checkout scm
-                            }
-                            break
-                        } catch (Exception e) {
-                            if (attempt == maxAttempts) {
-                                throw e
-                            }
-                            echo "Checkout attempt ${attempt}/${maxAttempts} failed: ${e.getClass().getSimpleName()} - ${e.getMessage()}"
-                            echo "Waiting ${retryWaitSeconds}s before retry..."
-                            sleep time: retryWaitSeconds, unit: 'SECONDS'
-                        }
-                    }
-                }
-                sh 'git log -1 --oneline || true'
+                echo 'Skipping explicit checkout scm (pipeline source is already loaded from SCM).'
             }
         }
 
