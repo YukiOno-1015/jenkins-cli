@@ -206,7 +206,7 @@ pipeline {
                             }
 
                             def patchRes = cfPatchByPath(
-                                "/zones/${env.CF_ZONE_ID}/rulesets/${rulesetId}/rules/${rule.id}",
+                                "/zones/$CF_ZONE_ID/rulesets/${rulesetId}/rules/${rule.id}",
                                 patchMap
                             )
 
@@ -287,7 +287,22 @@ def cfPatch(String url, Map bodyMap) {
 
 /** API パス（例: /zones/$CF_ZONE_ID/...）へ PATCH リクエスト */
 def cfPatchByPath(String apiPath, Map bodyMap) {
-    return cfPatch("${env.CF_API_BASE}${apiPath}", bodyMap)
+    def jsonBody = groovy.json.JsonOutput.toJson(bodyMap)
+    def tmpFile  = "${env.WORKSPACE}/.cf_patch_body.json"
+    writeFile file: tmpFile, text: jsonBody
+
+    def raw = sh(
+        script: """curl -s -w '\\n%{http_code}' \\
+            -X PATCH \\
+            -H "Authorization: Bearer \$CF_API_TOKEN" \\
+            -H 'Content-Type: application/json' \\
+            --data "@${tmpFile}" \\
+            "${env.CF_API_BASE}${apiPath}""",
+        returnStdout: true
+    ).trim()
+
+    sh "rm -f '${tmpFile}'"
+    return parseResponse(raw)
 }
 
 /** curl レスポンス（本文 + ステータスコード）をパース */
