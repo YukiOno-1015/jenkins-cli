@@ -1,4 +1,3 @@
-import groovy.json.JsonSlurperClassic
 import groovy.transform.Field
 
 /*
@@ -719,7 +718,7 @@ def parseBody(String bodyText) {
 
     if ((text.startsWith('{') && text.endsWith('}')) || (text.startsWith('[') && text.endsWith(']'))) {
         try {
-            return new JsonSlurperClassic().parseText(text)
+            return readJSON(text: text)
         } catch (Exception ignored) {
             return text
         }
