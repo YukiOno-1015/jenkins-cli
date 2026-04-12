@@ -88,6 +88,13 @@ pipeline {
                             error("Token verification failed: HTTP ${res.code}\n${res.raw}")
                         }
                         echo "Token status: ${res.body.result?.status}"
+
+                        echo '=== Verifying Zone Access ==='
+                        def zoneRes = cfGetByPath('/zones/$CF_ZONE_ID')
+                        if (zoneRes.code != 200) {
+                            error("Zone access verification failed: HTTP ${zoneRes.code}\n${zoneRes.raw}\nCheck token scopes (Zone.Firewall Services:Edit) and CF_ZONE_ID.")
+                        }
+                        echo "Zone access OK: ${zoneRes.body.result?.name ?: 'unknown'}"
                     }
                 }
             }
@@ -140,9 +147,7 @@ pipeline {
                     withCloudflareCredentials {
                         // 1. エントリポイント ruleset 取得
                         echo '=== Fetching Cloudflare entrypoint ruleset ==='
-                        def rulesetRes = cfGet(
-                            "${env.CF_API_BASE}/zones/${env.CF_ZONE_ID}/rulesets/phases/http_request_firewall_custom/entrypoint"
-                        )
+                        def rulesetRes = cfGetByPath('/zones/$CF_ZONE_ID/rulesets/phases/http_request_firewall_custom/entrypoint')
                         if (rulesetRes.code != 200) {
                             error("Failed to fetch ruleset: HTTP ${rulesetRes.code}\n${rulesetRes.raw}")
                         }
@@ -194,7 +199,7 @@ pipeline {
                             }
 
                             def patchRes = cfPatch(
-                                "${env.CF_API_BASE}/zones/${env.CF_ZONE_ID}/rulesets/${rulesetId}/rules/${rule.id}",
+                                "${env.CF_API_BASE}/zones/$CF_ZONE_ID/rulesets/${rulesetId}/rules/${rule.id}",
                                 patchMap
                             )
 
@@ -237,6 +242,17 @@ def cfGet(String url) {
         script: """curl -s -w '\\n%{http_code}' \
             -H "Authorization: Bearer \$CF_API_TOKEN" \
             '${url}'""",
+        returnStdout: true
+    ).trim()
+    return parseResponse(raw)
+}
+
+/** API パス（例: /zones/$CF_ZONE_ID/...）から GET リクエスト */
+def cfGetByPath(String apiPath) {
+    def raw = sh(
+        script: """curl -s -w '\\n%{http_code}' \\
+            -H "Authorization: Bearer \$CF_API_TOKEN" \\
+            "${env.CF_API_BASE}${apiPath}""",
         returnStdout: true
     ).trim()
     return parseResponse(raw)
