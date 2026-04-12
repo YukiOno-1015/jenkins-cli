@@ -14,7 +14,22 @@
 def qiitaConfig = [:]
 
 pipeline {
-    agent { label 'machost' }
+    agent {
+        kubernetes {
+            defaultContainer 'main'
+            yaml '''
+apiVersion: v1
+kind: Pod
+spec:
+  containers:
+  - name: main
+    image: honoka4869/jenkins-maven-node:latest
+    command:
+    - cat
+    tty: true
+'''
+        }
+    }
 
     triggers { cron('TZ=Asia/Tokyo\nH/10 * * * *') }
 
@@ -25,7 +40,7 @@ pipeline {
     }
 
     parameters {
-        string(name: 'TARGET_ORGANIZATIONS', defaultValue: 'qiita-inc', description: '監視対象 organization_url_name（カンマ区切り）')
+        string(name: 'TARGET_ORGANIZATIONS', defaultValue: 'jqiit-co', description: '監視対象 organization_url_name（カンマ区切り）')
         booleanParam(name: 'DO_LIKE', defaultValue: true, description: 'true の場合、記事へ「いいね」を付与する')
         booleanParam(name: 'DO_STOCK', defaultValue: true, description: 'true の場合、記事をストックする')
         booleanParam(name: 'DRY_RUN', defaultValue: false, description: 'true の場合、実 API 更新をせず対象抽出のみ行う')
