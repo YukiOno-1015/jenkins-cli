@@ -153,8 +153,8 @@ spec:
                                     if (!userId) {
                                         echo "[WARN] userId が空のためスキップします: credentialId=${credentialId}"
                                     } else {
-                                        def followees = collectPaged(cfg, '/authenticated_user/followees', syncConfig.maxPageCount)
-                                        def followingTags = collectPaged(cfg, '/authenticated_user/following_tags', syncConfig.maxPageCount)
+                                        def followees = collectPaged(cfg, "/users/${userId}/followees", syncConfig.maxPageCount)
+                                        def followingTags = collectPaged(cfg, "/users/${userId}/following_tags", syncConfig.maxPageCount)
 
                                         activeAccounts << [
                                             credentialId : credentialId,
