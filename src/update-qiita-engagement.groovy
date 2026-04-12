@@ -1,5 +1,4 @@
 import groovy.transform.Field
-import com.cloudbees.groovy.cps.NonCPS
 
 /*
  * ============================================================
@@ -148,7 +147,7 @@ spec:
                     /*
                      * カンマ区切りの organization 名を配列へ整形。
                      */
-                    def organizations = parseCsv(params.TARGET_ORGANIZATIONS)
+                    def organizations = qiitaEngagementUtils.parseCsv(params.TARGET_ORGANIZATIONS)
 
                     if (organizations.isEmpty()) {
                         error('TARGET_ORGANIZATIONS is empty. Set at least one public organization_url_name.')
@@ -163,9 +162,9 @@ spec:
                         error('QIITA_TOKEN_CREDENTIAL_ID is empty.')
                     }
 
-                    int maxStateIds   = toBoundedInt(params.MAX_STATE_IDS, 5000, 100, 50000)
-                    int httpTimeout   = toBoundedInt(params.HTTP_TIMEOUT_SEC, 30, 5, 300)
-                    int httpRetry     = toBoundedInt(params.HTTP_RETRY_COUNT, 3, 1, 10)
+                    int maxStateIds   = qiitaEngagementUtils.toBoundedInt(params.MAX_STATE_IDS, 5000, 100, 50000)
+                    int httpTimeout   = qiitaEngagementUtils.toBoundedInt(params.HTTP_TIMEOUT_SEC, 30, 5, 300)
+                    int httpRetry     = qiitaEngagementUtils.toBoundedInt(params.HTTP_RETRY_COUNT, 3, 1, 10)
 
                     def stateFilePath = (params.STATE_FILE_PATH ?: '').trim()
                     if (!stateFilePath) {
@@ -173,7 +172,7 @@ spec:
                     }
 
                     def stateDirPath = sh(
-                        script: "dirname '${shellQuote(stateFilePath)}'",
+                        script: "dirname '${qiitaEngagementUtils.shellQuote(stateFilePath)}'",
                         returnStdout: true
                     ).trim()
 
@@ -226,7 +225,7 @@ spec:
                     /*
                      * state ディレクトリ作成
                      */
-                    sh "mkdir -p '${shellQuote(qiitaConfig.stateDir)}'"
+                    sh "mkdir -p '${qiitaEngagementUtils.shellQuote(qiitaConfig.stateDir)}'"
 
                     /*
                      * 既存の処理済み item_id 一覧をロード
@@ -300,7 +299,7 @@ spec:
                          * 同一 item_id は重複排除。
                          * created_at 昇順で古いものから処理。
                          */
-                        targets = normalizeTargets(targets)
+                        targets = qiitaEngagementUtils.normalizeTargets(targets)
 
                         if (targets.isEmpty()) {
                             echo 'No new public organization posts detected.'
@@ -334,7 +333,7 @@ spec:
                             } else {
                                 if (qiitaConfig.doLike) {
                                     def likeRes = qiitaPut("/items/${target.id}/like")
-                                    if (isSuccessCode(likeRes.code)) {
+                                    if (qiitaEngagementUtils.isSuccessCode(likeRes.code)) {
                                         likeOk = true
                                         likedCount++
                                     } else if (likeRes.code == 409) {
@@ -344,32 +343,32 @@ spec:
                                         likeOk = true
                                         skippedCount++
                                         echo "[INFO] Like already exists or conflict treated as success: ${target.id}"
-                                    } else if (isAlreadyLikeResponse(likeRes)) {
+                                    } else if (qiitaEngagementUtils.isAlreadyLikeResponse(likeRes)) {
                                         likeOk = true
                                         skippedCount++
                                         echo "[INFO] Like already exists (403 already_liked) treated as success: ${target.id}"
                                     } else {
                                         likeOk = false
-                                        echo "[WARN] Like failed: id=${target.id}, HTTP=${likeRes.code}, body=${trimForLog(likeRes.rawBody)}"
+                                        echo "[WARN] Like failed: id=${target.id}, HTTP=${likeRes.code}, body=${qiitaEngagementUtils.trimForLog(likeRes.rawBody)}"
                                     }
                                 }
 
                                 if (qiitaConfig.doStock) {
                                     def stockRes = qiitaPut("/items/${target.id}/stock")
-                                    if (isSuccessCode(stockRes.code)) {
+                                    if (qiitaEngagementUtils.isSuccessCode(stockRes.code)) {
                                         stockOk = true
                                         stockedCount++
                                     } else if (stockRes.code == 409) {
                                         stockOk = true
                                         skippedCount++
                                         echo "[INFO] Stock already exists or conflict treated as success: ${target.id}"
-                                    } else if (isAlreadyStockResponse(stockRes)) {
+                                    } else if (qiitaEngagementUtils.isAlreadyStockResponse(stockRes)) {
                                         stockOk = true
                                         skippedCount++
                                         echo "[INFO] Stock already exists (403 already_stocked) treated as success: ${target.id}"
                                     } else {
                                         stockOk = false
-                                        echo "[WARN] Stock failed: id=${target.id}, HTTP=${stockRes.code}, body=${trimForLog(stockRes.rawBody)}"
+                                        echo "[WARN] Stock failed: id=${target.id}, HTTP=${stockRes.code}, body=${qiitaEngagementUtils.trimForLog(stockRes.rawBody)}"
                                     }
                                 }
                             }
@@ -392,7 +391,7 @@ spec:
                         merged.addAll(processedIds)
                         merged.addAll(existingIds)
 
-                        merged = normalizeStateIds(merged, qiitaConfig.maxStateIds)
+                        merged = qiitaEngagementUtils.normalizeStateIds(merged, qiitaConfig.maxStateIds)
 
                         saveStateIds(qiitaConfig.stateFile, merged)
 
@@ -449,113 +448,13 @@ spec:
  * カンマ区切り文字列を配列へ変換する。
  * 余計な空白を除去し、空要素を捨て、重複を排除する。
  */
-def parseCsv(String raw) {
-    return (raw ?: '')
-        .split(',')
-        .collect { it.trim() }
-        .findAll { it }
-        .unique()
-}
-
-/*
- * CPS ミスマッチ回避のため、target 一覧の整形を NonCPS で実施する。
- * - private 記事を除外
- * - item_id で重複排除
- * - createdAt 昇順
- */
-@NonCPS
-def normalizeTargets(List rawTargets) {
-    def result = []
-    def seen = [] as Set
-
-    for (def t : (rawTargets ?: [])) {
-        if (!(t instanceof Map)) {
-            continue
-        }
-        if (t.privateFlg == true) {
-            continue
-        }
-
-        def id = (t.id ?: '').toString().trim()
-        if (!id || seen.contains(id)) {
-            continue
-        }
-
-        seen << id
-        result << t
-    }
-
-    result.sort { a, b ->
-        def aCreated = (a.createdAt ?: '').toString()
-        def bCreated = (b.createdAt ?: '').toString()
-        aCreated <=> bCreated
-    }
-
-    return result
-}
-
-/*
- * state ID 一覧を正規化する（空除去・trim・重複排除・上限件数適用）。
- */
-@NonCPS
-def normalizeStateIds(List rawIds, int maxSize) {
-    def result = []
-    def seen = [] as Set
-
-    for (def idRaw : (rawIds ?: [])) {
-        def id = (idRaw ?: '').toString().trim()
-        if (!id || seen.contains(id)) {
-            continue
-        }
-
-        seen << id
-        result << id
-
-        if (result.size() >= maxSize) {
-            break
-        }
-    }
-
-    return result
-}
-
-/*
- * 任意入力を int に変換し、最小値/最大値で丸める。
- */
-def toBoundedInt(def raw, int defaultValue, int min, int max) {
-    int value
-    try {
-        value = (raw?.toString()?.trim() ?: defaultValue.toString()) as Integer
-    } catch (Exception ignored) {
-        value = defaultValue
-    }
-    return Math.max(min, Math.min(max, value))
-}
-
-/*
- * シェルのシングルクォート埋め込み対策。
- */
-def shellQuote(String value) {
-    return (value ?: '').replace("'", "'\"'\"'")
-}
-
-/*
- * ログ出力用に長い本文を切り詰める。
- */
-def trimForLog(String s, int maxLen = 800) {
-    def text = (s ?: '').trim()
-    if (text.length() <= maxLen) {
-        return text
-    }
-    return text.substring(0, maxLen) + ' ...<trimmed>'
-}
 
 /*
  * state ファイルから処理済み item_id を読み込む。
  */
 def loadStateIds(String stateFilePath) {
     def output = sh(
-        script: "cat '${shellQuote(stateFilePath)}' 2>/dev/null || true",
+        script: "cat '${qiitaEngagementUtils.shellQuote(stateFilePath)}' 2>/dev/null || true",
         returnStdout: true
     ).trim()
 
@@ -790,37 +689,4 @@ def parseBody(String bodyText) {
     }
 
     return text
-}
-
-/*
- * 成功扱い HTTP code 判定
- */
-def isSuccessCode(int code) {
-    return [200, 201, 204].contains(code)
-}
-
-/*
- * Qiita は既に like 済みの場合に 403 + type=already_liked を返す。
- * 冪等実行のため成功扱いにする。
- */
-def isAlreadyLikeResponse(def res) {
-    if ((res?.code ?: 0) != 403) {
-        return false
-    }
-
-    def bodyType = (res?.body instanceof Map) ? (res.body.type ?: '').toString() : ''
-    return bodyType == 'already_liked'
-}
-
-/*
- * Qiita は既に stock 済みの場合に 403 + type=already_stocked を返す。
- * 冪等実行のため成功扱いにする。
- */
-def isAlreadyStockResponse(def res) {
-    if ((res?.code ?: 0) != 403) {
-        return false
-    }
-
-    def bodyType = (res?.body instanceof Map) ? (res.body.type ?: '').toString() : ''
-    return bodyType == 'already_stocked'
 }
