@@ -138,11 +138,10 @@ spec:
 
                     def targets = []
                     withCredentials([string(credentialsId: qiitaConfig.credentialId, variable: 'QIITA_TOKEN')]) {
-                        // organization ごとに API レベルで絞り込んで取得する（全件取得→ローカルフィルタより効率的）
+                        // Organization 専用エンドポイントで絞り込んで取得する
                         for (def orgName in qiitaConfig.organizations) {
                             for (int page = 1; page <= qiitaConfig.maxPages; page++) {
-                                def encodedOrg = java.net.URLEncoder.encode("organization:${orgName}", 'UTF-8')
-                                def res = qiitaGet("/items?query=${encodedOrg}&page=${page}&per_page=${qiitaConfig.perPage}")
+                                def res = qiitaGet("/organizations/${orgName}/items?page=${page}&per_page=${qiitaConfig.perPage}")
                                 if (res.code != 200) {
                                     error("Failed to fetch items for org '${orgName}': HTTP ${res.code}\n${res.raw}")
                                 }
