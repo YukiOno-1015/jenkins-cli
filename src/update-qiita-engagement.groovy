@@ -40,7 +40,7 @@ spec:
     }
 
     parameters {
-        string(name: 'TARGET_ORGANIZATIONS', defaultValue: 'jqiit-co', description: '監視対象 organization_url_name（カンマ区切り）')
+        string(name: 'TARGET_ORGANIZATIONS', defaultValue: 'jqiit-co,lberc', description: '監視対象 organization_url_name（カンマ区切り）')
         booleanParam(name: 'DO_LIKE', defaultValue: true, description: 'true の場合、記事へ「いいね」を付与する')
         booleanParam(name: 'DO_STOCK', defaultValue: true, description: 'true の場合、記事をストックする')
         booleanParam(name: 'DRY_RUN', defaultValue: false, description: 'true の場合、実 API 更新をせず対象抽出のみ行う')
@@ -138,34 +138,59 @@ spec:
 
                     def targets = []
                     withCredentials([string(credentialsId: qiitaConfig.credentialId, variable: 'QIITA_TOKEN')]) {
-                        // 検索クエリで Organization を絞り込む（organization: 演算子）
-                        // コロンは URL エンコード（%3A）して送信する
+                        // Organization の RSS/Atom フィードから記事 ID を取得し、API で詳細を確認する。
+                        // search API の organization: クエリは組織記事をインデックスしない場合があるため
+                        // フィードベースのアプローチを使用する。
                         for (def orgName in qiitaConfig.organizations) {
-                            for (int page = 1; page <= qiitaConfig.maxPages; page++) {
-                                def res = qiitaGet("/items?page=${page}&per_page=${qiitaConfig.perPage}&query=organization%3A${orgName}")
-                                if (res.code != 200) {
-                                    error("Failed to fetch items for org '${orgName}': HTTP ${res.code}\n${res.raw}")
+                            def feedFile = "/tmp/qiita_org_feed_${orgName}.xml"
+
+                            // フィード取得（認証ヘッダー付き）
+                            def feedCurlExit = sh(
+                                script: """curl -sf \
+                                    -H 'Authorization: Bearer \$QIITA_TOKEN' \
+                                    'https://qiita.com/organizations/${orgName}/feed' \
+                                    -o '${feedFile}' 2>/dev/null; echo \$?""",
+                                returnStdout: true
+                            ).trim()
+
+                            if (feedCurlExit != '0') {
+                                echo "[WARN] RSS フィードの取得に失敗しました (org: ${orgName}, exit: ${feedCurlExit})"
+                                continue
+                            }
+
+                            // Atom フィードの <id> タグまたは href 属性から記事 URL を抽出し、末尾の記事 ID を取得
+                            def articleIds = sh(
+                                script: """grep -oE 'https://qiita\\.com/[^/<"]+/items/[A-Za-z0-9]+' '${feedFile}' \
+                                    | awk -F'/' '{print \$NF}' | sort -u 2>/dev/null || true""",
+                                returnStdout: true
+                            ).trim().readLines().findAll { it }
+
+                            if (articleIds.isEmpty()) {
+                                echo "[INFO] フィードから記事が見つかりませんでした (org: ${orgName})"
+                                continue
+                            }
+
+                            echo "フィード取得: ${articleIds.size()} 件の記事を検出 (org: ${orgName})"
+
+                            for (def itemId in articleIds) {
+                                if (existingSet.contains(itemId)) {
+                                    continue
                                 }
 
-                                def items = (res.body instanceof List) ? res.body : []
-                                if (items.isEmpty()) {
-                                    break
+                                def itemRes = qiitaGet("/items/${itemId}")
+                                if (itemRes.code != 200) {
+                                    echo "[WARN] 記事詳細の取得に失敗 (id: ${itemId}): HTTP ${itemRes.code}"
+                                    continue
                                 }
 
-                                for (def item in items) {
-                                    def itemId = (item.id ?: '').toString()
-                                    if (!itemId || existingSet.contains(itemId)) {
-                                        continue
-                                    }
-
-                                    targets << [
-                                        id: itemId,
-                                        title: (item.title ?: '').toString(),
-                                        url: (item.url ?: '').toString(),
-                                        org: orgName,
-                                        createdAt: (item.created_at ?: '').toString(),
-                                    ]
-                                }
+                                def item = itemRes.body
+                                targets << [
+                                    id: itemId,
+                                    title: (item.title ?: '').toString(),
+                                    url: (item.url ?: '').toString(),
+                                    org: orgName,
+                                    createdAt: (item.created_at ?: '').toString(),
+                                ]
                             }
                         }
 
