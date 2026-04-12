@@ -63,5 +63,5 @@
 
 ## 定期実行
 
-- 既定は「1時間ごと」に実行されます（`H * * * *`）。
-- 日次にしたい場合は [src/sync-qiita-profile-share.groovy](src/sync-qiita-profile-share.groovy#L38) の cron を `H 3 * * *` などへ変更してください。
+- 既定は「毎日1回（3時台）」に実行されます（`H 3 * * *`）。
+- 3時間ごとにしたい場合は [src/sync-qiita-profile-share.groovy](src/sync-qiita-profile-share.groovy#L37) の cron を `H */3 * * *` に変更してください。

@@ -35,11 +35,10 @@ spec:
     }
 
     /*
-     * 定期実行: 1時間ごと
-     * 日次にする場合は `H 3 * * *` などへ変更する。
+     * 定期実行: 毎日1回（3時台、分はHで分散）
      */
     triggers {
-        cron('TZ=Asia/Tokyo\nH * * * *')
+        cron('TZ=Asia/Tokyo\nH 3 * * *')
     }
 
     options {
