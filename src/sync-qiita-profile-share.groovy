@@ -75,7 +75,7 @@ spec:
 
         booleanParam(
             name: 'DRY_RUN',
-            defaultValue: true,
+            defaultValue: false,
             description: 'true の場合は同期 API 更新をせず、差分サマリのみ出力'
         )
     }
