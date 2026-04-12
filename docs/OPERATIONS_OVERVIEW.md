@@ -39,7 +39,7 @@
 
 ### Qiita 自動エンゲージメント
 
-- `qiita-access-token` (Secret text)
+- `jqit-qiita-access-token` (Secret text)
   - 必須スコープ: `read_qiita`, `write_qiita`
   - 通常 Qiita の記事を対象にする場合に利用
 - `STATE_FILE_PATH` (Jenkins パラメータ)

@@ -1,5 +1,15 @@
 import groovy.transform.Field
 
+def libBranch = env.CHANGE_BRANCH ?: env.BRANCH_NAME ?: 'main'
+def libId = "jqit-lib@${libBranch}"
+
+try {
+    library libId
+} catch (err) {
+    echo "${libId} の読み込みに失敗しました。jqit-lib@main へフォールバックします。"
+    library 'jqit-lib@main'
+}
+
 /*
  * ============================================================
  * 公開 Qiita Organization 新着記事 自動エンゲージメント Pipeline
@@ -19,7 +29,10 @@ import groovy.transform.Field
  *
  * ■必要な Jenkins Credential
  *   Kind: Secret text
- *   Credential ID: qiita-access-token
+ *   Credential ID 例:
+ *     - jqit-qiita-access-token
+ *     - personal-qiita-access-token
+ *     - lberc-qiita-access-token
  *   値: write_qiita を含む Qiita API Token
  *
  * ■主な特徴
@@ -104,8 +117,14 @@ spec:
 
         string(
             name: 'QIITA_TOKEN_CREDENTIAL_ID',
-            defaultValue: 'qiita-access-token',
-            description: 'Qiita API Token の Jenkins Credential ID（write_qiita を含む）'
+            defaultValue: 'jqit-qiita-access-token',
+            description: 'Qiita API Token の Jenkins Credential ID（単一運用時。複数運用時は QIITA_TOKEN_CREDENTIAL_IDS を優先）'
+        )
+
+        string(
+            name: 'QIITA_TOKEN_CREDENTIAL_IDS',
+            defaultValue: 'jqit-qiita-access-token,personal-qiita-access-token,lberc-qiita-access-token',
+            description: 'Qiita API Token の Jenkins Credential ID（カンマ区切り）。例: jqit-...,personal-...,lberc-...'
         )
 
         string(
@@ -157,9 +176,16 @@ spec:
                         error('DO_LIKE と DO_STOCK が両方 false です。いずれか一方を有効にしてください。')
                     }
 
-                    def credentialId = (params.QIITA_TOKEN_CREDENTIAL_ID ?: '').trim()
-                    if (!credentialId) {
-                        error('QIITA_TOKEN_CREDENTIAL_ID が空です。')
+                    def credentialIds = qiitaEngagementUtils.parseCsv(params.QIITA_TOKEN_CREDENTIAL_IDS)
+                    if (credentialIds.isEmpty()) {
+                        def singleCredentialId = (params.QIITA_TOKEN_CREDENTIAL_ID ?: '').trim()
+                        if (singleCredentialId) {
+                            credentialIds = [singleCredentialId]
+                        }
+                    }
+
+                    if (credentialIds.isEmpty()) {
+                        error('QIITA_TOKEN_CREDENTIAL_IDS / QIITA_TOKEN_CREDENTIAL_ID が空です。')
                     }
 
                     int maxStateIds   = qiitaEngagementUtils.toBoundedInt(params.MAX_STATE_IDS, 5000, 100, 50000)
@@ -181,7 +207,7 @@ spec:
                         doLike        : params.DO_LIKE,
                         doStock       : params.DO_STOCK,
                         dryRun        : params.DRY_RUN,
-                        credentialId  : credentialId,
+                        credentialIds : credentialIds,
                         stateFile     : stateFilePath,
                         stateDir      : stateDirPath,
                         maxStateIds   : maxStateIds,
@@ -195,7 +221,7 @@ spec:
                     echo "State 最大件数  : ${qiitaConfig.maxStateIds}"
                     echo "HTTP タイムアウト: ${qiitaConfig.httpTimeoutSec}s"
                     echo "HTTP リトライ回数: ${qiitaConfig.httpRetryCount}"
-                    echo "Credential ID  : ${qiitaConfig.credentialId}"
+                    echo "Credential IDs : ${qiitaConfig.credentialIds.join(', ')}"
                 }
             }
         }
@@ -203,17 +229,19 @@ spec:
         stage('Verify Qiita Token') {
             steps {
                 script {
-                    withCredentials([string(credentialsId: qiitaConfig.credentialId, variable: 'QIITA_TOKEN')]) {
-                        /*
-                         * /authenticated_user で token の有効性と権限を確認。
-                         */
-                        def whoami = qiitaEngagementUtils.qiitaGet(qiitaConfig, env.QIITA_API_BASE, '/authenticated_user')
-                        if (whoami.code != 200) {
-                            error("Qiita トークン検証に失敗しました: HTTP ${whoami.code}\n${whoami.rawBody}")
-                        }
+                    for (String credentialId : qiitaConfig.credentialIds) {
+                        withCredentials([string(credentialsId: credentialId, variable: 'QIITA_TOKEN')]) {
+                            /*
+                             * /authenticated_user で token の有効性と権限を確認。
+                             */
+                            def whoami = qiitaEngagementUtils.qiitaGet(qiitaConfig, env.QIITA_API_BASE, '/authenticated_user')
+                            if (whoami.code != 200) {
+                                error("Qiita トークン検証に失敗しました: credentialId=${credentialId}, HTTP ${whoami.code}\n${whoami.rawBody}")
+                            }
 
-                        def userId = (whoami.body instanceof Map) ? (whoami.body.id ?: 'unknown') : 'unknown'
-                        echo "認証ユーザー: ${userId}"
+                            def userId = (whoami.body instanceof Map) ? (whoami.body.id ?: 'unknown') : 'unknown'
+                            echo "認証ユーザー: credentialId=${credentialId}, user=${userId}"
+                        }
                     }
                 }
             }
@@ -236,7 +264,9 @@ spec:
 
                     def targets = []
 
-                    withCredentials([string(credentialsId: qiitaConfig.credentialId, variable: 'QIITA_TOKEN')]) {
+                    def readerCredentialId = qiitaConfig.credentialIds[0]
+
+                    withCredentials([string(credentialsId: readerCredentialId, variable: 'QIITA_TOKEN')]) {
                         /*
                          * 各 Organization について、フィードから記事候補を検出。
                          */
@@ -255,10 +285,6 @@ spec:
                              * 本当に対象 Organization の公開記事かチェックする。
                              */
                             for (String itemId : itemIds) {
-                                if (existingSet.contains(itemId)) {
-                                    continue
-                                }
-
                                 def itemRes = qiitaEngagementUtils.qiitaGet(qiitaConfig, env.QIITA_API_BASE, "/items/${itemId}")
                                 if (itemRes.code != 200) {
                                     echo "[WARN] 記事詳細の取得失敗: id=${itemId}, HTTP=${itemRes.code}"
@@ -306,80 +332,94 @@ spec:
                             return
                         }
 
-                        int likedCount   = 0
-                        int stockedCount = 0
-                        int failedCount  = 0
-                        int skippedCount = 0
-                        def processedIds = []
+                        int likedCount    = 0
+                        int stockedCount  = 0
+                        int failedCount   = 0
+                        int skippedCount  = 0
+                        def processedKeys = []
 
-                        /*
-                         * 各記事に対して like / stock を実行。
-                         */
-                        for (def target : targets) {
-                            echo "対象記事: [${target.org}] ${target.title} (${target.id})"
-                            echo "URL     : ${target.url}"
-                            echo "日付    : 作成=${target.createdAt}, 更新=${target.updatedAt}"
+                        for (String credentialId : qiitaConfig.credentialIds) {
+                            withCredentials([string(credentialsId: credentialId, variable: 'QIITA_TOKEN')]) {
+                                echo "[INFO] いいね/ストック実行中: credentialId=${credentialId}"
 
-                            boolean likeOk  = !qiitaConfig.doLike
-                            boolean stockOk = !qiitaConfig.doStock
-
-                            if (qiitaConfig.dryRun) {
                                 /*
-                                 * DRY_RUN では API 更新せず、成功扱いで進める。
+                                 * 各記事に対して like / stock を実行。
                                  */
-                                echo "[DRY_RUN] ${target.id} への書き込みをスキップします。"
-                                likeOk = true
-                                stockOk = true
-                            } else {
-                                if (qiitaConfig.doLike) {
-                                    def likeRes = qiitaEngagementUtils.qiitaPut(qiitaConfig, env.QIITA_API_BASE, "/items/${target.id}/like")
-                                    if (qiitaEngagementUtils.isSuccessCode(likeRes.code)) {
-                                        likeOk = true
-                                        likedCount++
-                                    } else if (likeRes.code == 409) {
+                                for (def target : targets) {
+                                    def stateKey = "${credentialId}:${target.id}"
+
+                                    if (existingSet.contains(stateKey)) {
+                                        skippedCount++
+                                        continue
+                                    }
+
+                                    echo "対象記事: [${target.org}] ${target.title} (${target.id})"
+                                    echo "URL     : ${target.url}"
+                                    echo "日付    : 作成=${target.createdAt}, 更新=${target.updatedAt}"
+                                    echo "実行対象 Credential: ${credentialId}"
+
+                                    boolean likeOk  = !qiitaConfig.doLike
+                                    boolean stockOk = !qiitaConfig.doStock
+
+                                    if (qiitaConfig.dryRun) {
                                         /*
-                                         * 既に like 済みなど、競合扱いを許容する場合。
+                                         * DRY_RUN では API 更新せず、成功扱いで進める。
                                          */
+                                        echo "[DRY_RUN] ${target.id} への書き込みをスキップします。"
                                         likeOk = true
-                                        skippedCount++
-                                        echo "[INFO] いいね済みまたは競合のため成功扱い: ${target.id}"
-                                    } else if (qiitaEngagementUtils.isAlreadyLikeResponse(likeRes)) {
-                                        likeOk = true
-                                        skippedCount++
-                                        echo "[INFO] いいね済み（403 already_liked）のため成功扱い: ${target.id}"
+                                        stockOk = true
                                     } else {
-                                        likeOk = false
-                                        echo "[WARN] いいね失敗: id=${target.id}, HTTP=${likeRes.code}, body=${qiitaEngagementUtils.trimForLog(likeRes.rawBody)}"
+                                        if (qiitaConfig.doLike) {
+                                            def likeRes = qiitaEngagementUtils.qiitaPut(qiitaConfig, env.QIITA_API_BASE, "/items/${target.id}/like")
+                                            if (qiitaEngagementUtils.isSuccessCode(likeRes.code)) {
+                                                likeOk = true
+                                                likedCount++
+                                            } else if (likeRes.code == 409) {
+                                                /*
+                                                 * 既に like 済みなど、競合扱いを許容する場合。
+                                                 */
+                                                likeOk = true
+                                                skippedCount++
+                                                echo "[INFO] いいね済みまたは競合のため成功扱い: ${target.id}"
+                                            } else if (qiitaEngagementUtils.isAlreadyLikeResponse(likeRes)) {
+                                                likeOk = true
+                                                skippedCount++
+                                                echo "[INFO] いいね済み（403 already_liked）のため成功扱い: ${target.id}"
+                                            } else {
+                                                likeOk = false
+                                                echo "[WARN] いいね失敗: credentialId=${credentialId}, id=${target.id}, HTTP=${likeRes.code}, body=${qiitaEngagementUtils.trimForLog(likeRes.rawBody)}"
+                                            }
+                                        }
+
+                                        if (qiitaConfig.doStock) {
+                                            def stockRes = qiitaEngagementUtils.qiitaPut(qiitaConfig, env.QIITA_API_BASE, "/items/${target.id}/stock")
+                                            if (qiitaEngagementUtils.isSuccessCode(stockRes.code)) {
+                                                stockOk = true
+                                                stockedCount++
+                                            } else if (stockRes.code == 409) {
+                                                stockOk = true
+                                                skippedCount++
+                                                echo "[INFO] ストック済みまたは競合のため成功扱い: ${target.id}"
+                                            } else if (qiitaEngagementUtils.isAlreadyStockResponse(stockRes)) {
+                                                stockOk = true
+                                                skippedCount++
+                                                echo "[INFO] ストック済み（403 already_stocked）のため成功扱い: ${target.id}"
+                                            } else {
+                                                stockOk = false
+                                                echo "[WARN] ストック失敗: credentialId=${credentialId}, id=${target.id}, HTTP=${stockRes.code}, body=${qiitaEngagementUtils.trimForLog(stockRes.rawBody)}"
+                                            }
+                                        }
+                                    }
+
+                                    /*
+                                     * 実行対象の全アクションが成功した場合のみ state へ保存。
+                                     */
+                                    if (likeOk && stockOk) {
+                                        processedKeys << stateKey
+                                    } else {
+                                        failedCount++
                                     }
                                 }
-
-                                if (qiitaConfig.doStock) {
-                                    def stockRes = qiitaEngagementUtils.qiitaPut(qiitaConfig, env.QIITA_API_BASE, "/items/${target.id}/stock")
-                                    if (qiitaEngagementUtils.isSuccessCode(stockRes.code)) {
-                                        stockOk = true
-                                        stockedCount++
-                                    } else if (stockRes.code == 409) {
-                                        stockOk = true
-                                        skippedCount++
-                                        echo "[INFO] ストック済みまたは競合のため成功扱い: ${target.id}"
-                                    } else if (qiitaEngagementUtils.isAlreadyStockResponse(stockRes)) {
-                                        stockOk = true
-                                        skippedCount++
-                                        echo "[INFO] ストック済み（403 already_stocked）のため成功扱い: ${target.id}"
-                                    } else {
-                                        stockOk = false
-                                        echo "[WARN] ストック失敗: id=${target.id}, HTTP=${stockRes.code}, body=${qiitaEngagementUtils.trimForLog(stockRes.rawBody)}"
-                                    }
-                                }
-                            }
-
-                            /*
-                             * 実行対象の全アクションが成功した場合のみ state へ保存。
-                             */
-                            if (likeOk && stockOk) {
-                                processedIds << target.id
-                            } else {
-                                failedCount++
                             }
                         }
 
@@ -388,7 +428,7 @@ spec:
                          * 最大件数に制限。
                          */
                         def merged = []
-                        merged.addAll(processedIds)
+                        merged.addAll(processedKeys)
                         merged.addAll(existingIds)
 
                         merged = qiitaEngagementUtils.normalizeStateIds(merged, qiitaConfig.maxStateIds)
