@@ -14,7 +14,7 @@ def libId = "jqit-lib@${libBranch}"
 try {
   library libId
 } catch (err) {
-  echo "Failed to load ${libId}, falling back to jqit-lib@main"
+  echo "${libId} の読み込みに失敗しました。jqit-lib@main へフォールバックします。"
   library 'jqit-lib@main'
 }
 
@@ -91,15 +91,15 @@ pipeline {
       steps {
         script {
           echo '========================================='
-          echo 'remoteSsh Test Pipeline'
+          echo 'remoteSsh テストパイプライン'
           echo '========================================='
-          echo "Target Host: ${params.TARGET_HOST}"
-          echo "SSH User: ${params.SSH_USER}"
+          echo "接続先ホスト: ${params.TARGET_HOST}"
+          echo "SSH ユーザー: ${params.SSH_USER}"
           echo "SSH Credentials ID: ${params.SSH_CREDENTIALS_ID}"
-          echo "Known Host: ${params.KNOWN_HOST?.trim() ? params.KNOWN_HOST.trim() : params.TARGET_HOST}"
-          echo "Use sudo: ${params.USE_SUDO}"
-          echo "Strict host key checking: ${params.STRICT_HOST_KEY_CHECKING}"
-          echo 'Command: remote OS version check only'
+          echo "known_hosts 登録ホスト: ${params.KNOWN_HOST?.trim() ? params.KNOWN_HOST.trim() : params.TARGET_HOST}"
+          echo "sudo 使用: ${params.USE_SUDO}"
+          echo "ホスト鍵検証（StrictHostKeyChecking）: ${params.STRICT_HOST_KEY_CHECKING}"
+          echo 'コマンド: リモート OS バージョン確認のみ'
           echo '========================================='
         }
       }
@@ -132,7 +132,7 @@ fi
           )
 
           echo '========================================='
-          echo 'Remote OS information'
+          echo 'リモート OS 情報'
           echo '========================================='
           echo osInfo
           echo '========================================='
@@ -143,11 +143,11 @@ fi
 
   post {
     success {
-      echo 'remoteSsh test completed successfully'
+      echo 'remoteSsh テストが正常に完了しました。'
     }
 
     failure {
-      echo 'remoteSsh test failed. Check host, user, credentials, and known_hosts settings.'
+      echo 'remoteSsh テストが失敗しました。ホスト・ユーザー・認証情報・known_hosts の設定を確認してください。'
     }
   }
 }

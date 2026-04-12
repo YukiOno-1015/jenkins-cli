@@ -352,7 +352,7 @@ pipeline {
                         'Proxmox 通知テスト',
                         buildTestNotificationBody()
                     )
-                    echo 'Notification test sent.'
+                    echo '通知テストを送信しました。'
                 }
             }
         }
@@ -367,12 +367,12 @@ pipeline {
                     proxmoxHostResults = []
 
                     for (host in PROXMOX_HOSTS) {
-                        echo "==== Inspecting ${host} ===="
+                        echo "==== ${host} を調査中 ===="
                         try {
                             def hostResult = inspectHost(host)
                             proxmoxHostResults << hostResult
 
-                            echo "[INFO] ${host}: pve=${hostResult.pveVersion}, updates=${hostResult.hasUpdates}, proxmoxUpdates=${hostResult.hasProxmoxUpdates}, quorate=${hostResult.clusterQuorate}"
+                            echo "[INFO] ${host}: pveバージョン=${hostResult.pveVersion}, 更新あり=${hostResult.hasUpdates}, Proxmox更新あり=${hostResult.hasProxmoxUpdates}, quorate=${hostResult.clusterQuorate}"
 
                             if (hostResult.proxmoxUpdates) {
                                 echo "[PVE-UPDATES] ${host}\n${hostResult.proxmoxUpdates}"
@@ -391,14 +391,14 @@ pipeline {
                     archiveArtifacts artifacts: 'proxmox-host-results.json', onlyIfSuccessful: false
 
                     if (!failedHosts.isEmpty()) {
-                        error("Inspection failed hosts: ${failedHosts.join(', ')}")
+                        error("調査に失敗したホスト: ${failedHosts.join(', ')}")
                     }
 
                     if (proxmoxHostResults.any { it.hasUpdates }) {
                         currentBuild.result = 'UNSTABLE'
-                        echo 'Pending updates detected on one or more Proxmox hosts.'
+                        echo '1台以上の Proxmox ホストで更新候補が検出されました。'
                     } else {
-                        echo 'No pending updates detected on Proxmox hosts.'
+                        echo 'Proxmox ホストに更新候補はありません。'
                     }
                 }
             }
@@ -413,10 +413,10 @@ pipeline {
                     def failedHosts = []
 
                     for (hostResult in proxmoxHostResults.findAll { it.hasUpdates }) {
-                        echo "==== Upgrading ${hostResult.host} ===="
+                        echo "==== ${hostResult.host} をアップグレード中 ===="
 
                         if (!canUpgradeSafely(hostResult)) {
-                            echo "[SKIP] ${hostResult.host}: cluster quorum is not healthy"
+                            echo "[SKIP] ${hostResult.host}: クラスタ quorum が健全でないためスキップします。"
                             failedHosts << hostResult.host
                             continue
                         }
@@ -431,7 +431,7 @@ pipeline {
                     }
 
                     if (!failedHosts.isEmpty()) {
-                        error("Upgrade failed hosts: ${failedHosts.join(', ')}")
+                        error("アップグレードに失敗したホスト: ${failedHosts.join(', ')}")
                     }
                 }
             }
@@ -440,7 +440,7 @@ pipeline {
 
     post {
         success {
-            echo 'Proxmox host inspection completed successfully'
+            echo 'Proxmox ホストの調査が正常に完了しました。'
         }
         unstable {
             script {
@@ -451,7 +451,7 @@ pipeline {
 更新する場合は Jenkins ジョブを開き、APPLY_UPDATES=true で実行してください。""".trim()
                 )
             }
-            echo 'Pending Proxmox updates were detected. Review artifacts or run with APPLY_UPDATES=true if appropriate.'
+            echo '更新候補が検出されました。製品物を確認するか、適用する場合は APPLY_UPDATES=true を指定して再実行してください。'
         }
         failure {
             script {
@@ -462,7 +462,7 @@ pipeline {
 ${summarizePendingUpdates(proxmoxHostResults)}""".trim()
                 )
             }
-            echo 'Proxmox host inspection/update failed. Check console log for details.'
+            echo 'Proxmox ホストの調査/更新が失敗しました。コンソールログを確認してください。'
         }
     }
 }

@@ -82,15 +82,15 @@ def call(Map config = [:]) {
         steps {
           script {
             echo "========================================="
-            echo "Unified GitHub Webhook Pipeline"
+            echo "統合 GitHub Webhook パイプライン"
             echo "========================================="
             
             // Webhook イベントタイプを検出
             def webhookEvent = env.CHANGE_ID ? 'pull_request' : 'push'
             env.WEBHOOK_EVENT = webhookEvent
             
-            echo "Webhook Event: ${webhookEvent}"
-            echo "Pull Request: ${env.CHANGE_ID ?: 'N/A'}"
+            echo "Webhook イベント: ${webhookEvent}"
+            echo "プルリクエスト: ${env.CHANGE_ID ?: 'N/A'}"
             
             // 認証情報付きチェックアウト（設定も一括取得）
             def checkoutInfo = authenticatedCheckout()
@@ -100,12 +100,12 @@ def call(Map config = [:]) {
             env.SONAR_PROJECT_NAME = config.sonarProjectName
             env.SONAR_ENABLED = config.sonarEnabled
             
-            echo "SonarQube project: ${config.sonarProjectName}"
-            echo "SonarQube enabled: ${config.sonarEnabled}"
+            echo "SonarQube プロジェクト: ${config.sonarProjectName}"
+            echo "SonarQube 有効: ${config.sonarEnabled}"
             
             // Jenkinsfile の存在確認
             env.HAS_JENKINSFILE = fileExists('Jenkinsfile') ? 'true' : 'false'
-            echo "Jenkinsfile exists: ${env.HAS_JENKINSFILE}"
+            echo "Jenkinsfile の存在: ${env.HAS_JENKINSFILE}"
             echo "========================================="
           }
         }
@@ -118,7 +118,7 @@ def call(Map config = [:]) {
         steps {
           script {
             echo "========================================="
-            echo "Found Jenkinsfile - Executing custom pipeline"
+            echo "Jenkinsfile を検出 - カスタムパイプラインを実行します"
             echo "========================================="
             
             // カスタム Jenkinsfile を実行
@@ -137,8 +137,8 @@ def call(Map config = [:]) {
         steps {
           script {
             echo "========================================="
-            echo "No Jenkinsfile - Running default tests"
-            echo "Running Tests - ${env.REPO_NAME}"
+            echo "Jenkinsfile なし - デフォルトテストを実行します"
+            echo "テスト実行 - ${env.REPO_NAME}"
             echo "========================================="
           }
           
@@ -161,8 +161,8 @@ def call(Map config = [:]) {
         steps {
           script {
             echo "========================================="
-            echo "No Jenkinsfile - Running default SonarQube analysis"
-            echo "SonarQube Analysis - ${env.REPO_NAME}"
+            echo "Jenkinsfile なし - デフォルト SonarQube 解析を実行します"
+            echo "SonarQube 解析 - ${env.REPO_NAME}"
             echo "========================================="
             
             withSonarQubeEnv('SonarQube') {
@@ -181,28 +181,28 @@ def call(Map config = [:]) {
       always {
         script {
           echo "========================================="
-          echo "Pipeline Completed - ${env.REPO_NAME}"
+          echo "パイプライン完了 - ${env.REPO_NAME}"
           echo "========================================="
-          echo "Build Result: ${currentBuild.result ?: 'SUCCESS'}"
-          echo "Duration: ${currentBuild.durationString}"
+          echo "ビルド結果: ${currentBuild.result ?: 'SUCCESS'}"
+          echo "実行時間: ${currentBuild.durationString}"
         }
       }
       
       success {
         script {
-          echo "✅ ${env.REPO_NAME} build succeeded!"
+          echo "✅ ${env.REPO_NAME} のビルドが成功しました!"
         }
       }
       
       failure {
         script {
-          echo "❌ ${env.REPO_NAME} build failed!"
+          echo "❌ ${env.REPO_NAME} のビルドが失敗しました!"
         }
       }
       
       unstable {
         script {
-          echo "⚠️ ${env.REPO_NAME} build is unstable!"
+          echo "⚠️ ${env.REPO_NAME} のビルドが不安定です!"
         }
       }
     }

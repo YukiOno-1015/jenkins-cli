@@ -19,7 +19,7 @@
 def call(Map args = [:]) {
   // 必須パラメータのバリデーション
   if (!args.repoUrl && !env.GIT_URL) {
-    error('repoUrl is required or GIT_URL must be set')
+    error('repoUrl または GIT_URL の設定が必要です。')
   }
   
   def repoUrl = args.repoUrl ?: env.GIT_URL
@@ -32,13 +32,13 @@ def call(Map args = [:]) {
   def credentialsId = config.credentialsId
   
   echo "========================================="
-  echo "Authenticated Git Checkout"
+  echo "認証付き Git チェックアウト"
   echo "========================================="
-  echo "Repository: ${repoName}"
+  echo "リポジトリ: ${repoName}"
   echo "URL: ${repoUrl}"
-  echo "Branch: ${branch}"
-  echo "Credentials: ${credentialsId}"
-  echo "Target Directory: ${targetDir}"
+  echo "ブランチ: ${branch}"
+  echo "認証情報: ${credentialsId}"
+  echo "配置先ディレクトリ: ${targetDir}"
   echo "========================================="
   
   // 認証情報を環境変数に保存（他のステージで参照可能）
@@ -61,12 +61,12 @@ def call(Map args = [:]) {
   // コミット情報の表示
   dir(targetDir) {
     sh '''
-      echo "Current commit details:"
+      echo "最新コミット詳細:"
       git log -1 --pretty=format:"Commit: %H%nAuthor: %an <%ae>%nDate: %ad%nMessage: %s" --date=format:"%Y-%m-%d %H:%M:%S"
       echo ""
       echo ""
-      echo "Changed files:"
-      git diff-tree --no-commit-id --name-status -r HEAD || echo "No changes detected"
+      echo "変更ファイル一覧:"
+      git diff-tree --no-commit-id --name-status -r HEAD || echo "変更ファイルなし"
     '''
   }
   
@@ -85,7 +85,7 @@ def call(Map args = [:]) {
 def getCredentials(String repoUrl = null) {
   def url = repoUrl ?: env.GIT_URL
   if (!url) {
-    error('repoUrl is required or GIT_URL must be set')
+    error('repoUrl または GIT_URL の設定が必要です。')
   }
   
   // リポジトリ設定を取得

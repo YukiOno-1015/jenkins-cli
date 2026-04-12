@@ -23,11 +23,11 @@ def buildRemoteScript(Map args) {
     def script = args.script?.toString()
 
     if (command && script) {
-        error('Specify either command or script, not both')
+        error('command と script は同時に指定できません。どちらか一方のみ指定してください。')
     }
 
     if (!command && !script) {
-        error('command or script is required')
+        error('command または script のいずれかを指定してください。')
     }
 
     def payload = script ?: command
@@ -50,15 +50,15 @@ def call(Map args = [:]) {
     def sshCredentialsId = args.sshCredentialsId?.toString()?.trim()
 
     if (!host) {
-        error('host is required')
+        error('host は必須パラメータです。')
     }
 
     if (!user) {
-        error('user is required')
+        error('user は必須パラメータです。')
     }
 
     if (!sshCredentialsId) {
-        error('sshCredentialsId is required')
+        error('sshCredentialsId は必須パラメータです。')
     }
 
     def port = args.get('port', 22) as Integer
@@ -70,7 +70,7 @@ def call(Map args = [:]) {
     def remoteScript = buildRemoteScript(args)
     def remoteEntrypoint = useSudo ? 'sudo -n bash -s' : 'bash -s'
 
-    echo "Running remote SSH command on ${host} as ${user}${useSudo ? ' with sudo' : ''}"
+    echo "リモート SSH コマンドを実行します: ${host}（ユーザー: ${user}${useSudo ? '、sudo使用' : ''}）"
 
     sshagent(credentials: [sshCredentialsId]) {
         def sshScript = """#!/bin/bash
@@ -87,7 +87,7 @@ if ${strictHostKeyChecking ? 'true' : 'false'}; then
   touch ~/.ssh/known_hosts
   chmod 600 ~/.ssh/known_hosts
 
-  echo "Adding \${SSH_KNOWN_HOST} to known_hosts (rsa/ecdsa/ed25519)"
+  echo "known_hosts に \${SSH_KNOWN_HOST} を追加します（rsa/ecdsa/ed25519）"
   ssh-keyscan -p "\${SSH_PORT}" -t rsa,ecdsa,ed25519 -H "\${SSH_KNOWN_HOST}" >> ~/.ssh/known_hosts 2>/dev/null || true
   sort -u ~/.ssh/known_hosts -o ~/.ssh/known_hosts || true
 

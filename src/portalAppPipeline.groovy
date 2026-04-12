@@ -16,7 +16,7 @@ def libId = "jqit-lib@${libBranch}"
 try {
   library libId
 } catch (err) {
-  echo "Failed to load ${libId}, falling back to jqit-lib@main"
+  echo "${libId} の読み込みに失敗しました。jqit-lib@main へフォールバックします。"
   library 'jqit-lib@main'
 }
 
@@ -85,8 +85,8 @@ sudo ln -s "$release_path" "$release_link"
 
 sudo systemctl restart portal
 
-echo "Staged artifact: $DEPLOY_FIRST_ARTIFACT"
-echo "Released artifact: $release_path"
+echo "Staging 成果物: $DEPLOY_FIRST_ARTIFACT"
+echo "リリース成果物: $release_path"
 ''',
 
   // 以下の設定は repositoryConfig.groovy から自動取得されます:

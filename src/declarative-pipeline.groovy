@@ -71,7 +71,7 @@ spec:
 
         stage('Checkout SCM') {
             steps {
-                echo 'Skipping explicit checkout scm (pipeline source is already loaded from SCM).'
+                echo 'SCM チェックアウトをスキップします（パイプラインソースはSCMから読み込み済み）。'
             }
         }
 
@@ -79,26 +79,26 @@ spec:
             steps {
                 script {
                     withCloudflareCredentials {
-                        echo '=== Verifying API Token ==='
+                        echo '=== API トークン検証 ==='
                         def res = cfGet("${env.CF_API_BASE}/user/tokens/verify")
                         if (res.code != 200) {
-                            error("Token verification failed: HTTP ${res.code}\n${res.raw}")
+                            error("トークン検証に失敗しました: HTTP ${res.code}\n${res.raw}")
                         }
-                        echo "Token status: ${res.body.result?.status}"
+                        echo "トークン状態: ${res.body.result?.status}"
 
-                        echo '=== Verifying Zone Access ==='
+                        echo '=== Zone アクセス検証 ==='
                         def zoneRes = cfGetByPath('/zones/$CF_ZONE_ID')
                         if (zoneRes.code != 200) {
-                            error("Zone access verification failed: HTTP ${zoneRes.code}\n${zoneRes.raw}\nCheck token scopes (Zone.Firewall Services:Edit) and CF_ZONE_ID.")
+                            error("Zone アクセス検証に失敗しました: HTTP ${zoneRes.code}\n${zoneRes.raw}\nトークンスコープ（Zone.Firewall Services:Edit）と CF_ZONE_ID を確認してください。")
                         }
-                        echo "Zone access OK: ${zoneRes.body.result?.name ?: 'unknown'}"
+                        echo "Zone アクセス確認OK: ${zoneRes.body.result?.name ?: 'unknown'}"
 
-                        echo '=== Verifying Ruleset Access ==='
+                        echo '=== Ruleset アクセス検証 ==='
                         def rulesetAccessRes = cfGetByPath('/zones/$CF_ZONE_ID/rulesets/phases/http_request_firewall_custom/entrypoint')
                         if (rulesetAccessRes.code != 200) {
-                            error("Ruleset access verification failed: HTTP ${rulesetAccessRes.code}\n${rulesetAccessRes.raw}\nToken can read zone but cannot access rulesets API. Check Zone WAF/Rulesets permissions and zone include settings.")
+                            error("Ruleset アクセス検証に失敗しました: HTTP ${rulesetAccessRes.code}\n${rulesetAccessRes.raw}\nトークンによる Zone の読み取りはできますが、Ruleset API へのアクセスができません。Zone WAF/Rulesets 権限と zone の include 設定を確認してください。")
                         }
-                        echo 'Ruleset access OK'
+                        echo 'Ruleset アクセス確認OK'
                     }
                 }
             }
@@ -113,10 +113,10 @@ spec:
                     ).trim()
 
                     if (!(ip ==~ /^(\d{1,3}\.){3}\d{1,3}$/)) {
-                        error("Invalid IP address fetched: ${ip}")
+                        error("取得した IP アドレスが不正です: ${ip}")
                     }
                     env.CURRENT_IP = ip
-                    echo "Current IP: ${env.CURRENT_IP}"
+                    echo "現在の IP: ${env.CURRENT_IP}"
                 }
             }
         }
@@ -128,7 +128,7 @@ spec:
                     def stateDir = sh(script: "dirname '${stateFile}'", returnStdout: true).trim()
                     sh "mkdir -p '${stateDir}'"
                     env.STATE_FILE_EFFECTIVE = stateFile
-                    echo "Using state file: ${env.STATE_FILE_EFFECTIVE}"
+                    echo "使用する State ファイル: ${env.STATE_FILE_EFFECTIVE}"
 
                     def prevIp = sh(
                         script: "cat '${env.STATE_FILE_EFFECTIVE}' 2>/dev/null || true",
@@ -136,13 +136,13 @@ spec:
                     ).trim()
 
                     if (env.CURRENT_IP == prevIp) {
-                        echo "No change detected (${env.CURRENT_IP}). Skipping update."
+                        echo "IP 変更なし（${env.CURRENT_IP}）。更新をスキップします。"
                         env.IP_CHANGED = 'false'
                     } else {
                         // 前回 IP が空の場合は current をフォールバックとして使用
                         env.PREV_IP    = prevIp ?: env.CURRENT_IP
                         env.IP_CHANGED = 'true'
-                        echo "IP changed: ${env.PREV_IP} -> ${env.CURRENT_IP}"
+                        echo "IP が変更されました: ${env.PREV_IP} → ${env.CURRENT_IP}"
                     }
                 }
             }
@@ -154,10 +154,10 @@ spec:
                 script {
                     withCloudflareCredentials {
                         // 1. エントリポイント ruleset 取得
-                        echo '=== Fetching Cloudflare entrypoint ruleset ==='
+                        echo '=== Cloudflare エントリポイント Ruleset 取得 ==='
                         def rulesetRes = cfGetByPath('/zones/$CF_ZONE_ID/rulesets/phases/http_request_firewall_custom/entrypoint')
                         if (rulesetRes.code != 200) {
-                            error("Failed to fetch ruleset: HTTP ${rulesetRes.code}\n${rulesetRes.raw}")
+                            error("Ruleset の取得に失敗しました: HTTP ${rulesetRes.code}\n${rulesetRes.raw}")
                         }
                         def rulesetId = rulesetRes.body.result.id
                         echo "Ruleset ID: ${rulesetId}"
@@ -168,20 +168,20 @@ spec:
                         for (def ruleDef in RULE_DEFS) {
                             def rule = rulesetRes.body.result.rules.find { it.description == ruleDef.desc }
                             if (!rule) {
-                                echo "WARNING: rule not found by description '${ruleDef.desc}' — skipped"
+                                echo "警告: 説明 '${ruleDef.desc}' に一致するルールが見つかりません。スキップします。"
                                 continue
                             }
                             matchedCount++
 
                             def hostValues = ruleDef.hosts ?: (ruleDef.hostname ? [ruleDef.hostname] : [])
                             if (!hostValues) {
-                                echo "WARNING: no host configuration found for '${ruleDef.desc}' — skipped"
+                                echo "警告: '${ruleDef.desc}' に対するホスト設定が見つかりません。スキップします。"
                                 continue
                             }
 
                             def allowedIps = (ruleDef.allowedIps ?: [env.CURRENT_IP, env.PREV_IP]).findAll { it?.trim() }
                             if (!allowedIps) {
-                                echo "WARNING: no allowed IPs configured for '${ruleDef.desc}' — skipped"
+                                echo "警告: '${ruleDef.desc}' に許可 IP が設定されていません。スキップします。"
                                 continue
                             }
 
@@ -191,7 +191,7 @@ spec:
                             def newExpr = "((${hostExpr}) and not ip.src in {${ipExpr}})"
 
                             if ((rule.expression ?: '').trim() == newExpr) {
-                                echo "Rule already up to date: ${ruleDef.desc}"
+                                echo "ルールは最新です（更新不要）: ${ruleDef.desc}"
                                 continue
                             }
 
@@ -212,22 +212,22 @@ spec:
                             )
 
                             if (patchRes.code == 200) {
-                                echo "Updated rule: ${ruleDef.desc}"
+                                echo "ルールを更新しました: ${ruleDef.desc}"
                                 updatedCount++
                             } else {
                                 def errMsg = patchRes.body?.errors?.getAt(0)?.message ?: "HTTP ${patchRes.code}"
-                                error("Failed to update rule '${ruleDef.desc}': ${errMsg}")
+                                error("ルール '${ruleDef.desc}' の更新に失敗しました: ${errMsg}")
                             }
                         }
 
                         if (matchedCount == 0) {
-                            error('No rules were matched — check rule descriptions in Cloudflare')
+                            error('一致するルールが見つかりませんでした。Cloudflare のルール説明を確認してください。')
                         }
 
                         // 3. 現在 IP をステートに保存
                         def stateFile = (env.STATE_FILE_EFFECTIVE ?: env.STATE_FILE).trim()
                         sh "echo '${env.CURRENT_IP}' > '${stateFile}'"
-                        echo "Allowlist sync finished: updated=${updatedCount}, matched=${matchedCount}, current=${env.CURRENT_IP}, prev=${env.PREV_IP}"
+                        echo "許可リスト同期完了: 更新=${updatedCount}, 一致=${matchedCount}, 現在IP=${env.CURRENT_IP}, 前回IP=${env.PREV_IP}"
                     }
                 }
             }
@@ -235,8 +235,8 @@ spec:
     }
 
     post {
-        success { echo 'Cloudflare allowlist updated successfully' }
-        failure { echo 'Cloudflare allowlist update failed. Check console log for details.' }
+        success { echo 'Cloudflare 許可リストの更新が正常に完了しました。' }
+        failure { echo 'Cloudflare 許可リストの更新が失敗しました。コンソールログを確認してください。' }
     }
 }
 
@@ -321,7 +321,7 @@ def withCloudflareCredentials(Closure body) {
     def envToken = env.CF_API_TOKEN?.trim()
     def envZoneId = env.CF_ZONE_ID?.trim()
     if (envToken && envZoneId) {
-        echo 'Using pre-injected environment variables for Cloudflare credentials'
+        echo 'Cloudflare 認証情報を環境変数から直接取得します。'
         withEnv(["CF_API_TOKEN=${envToken}", "CF_ZONE_ID=${envZoneId}"]) {
             body.call()
         }
@@ -340,7 +340,7 @@ def withCloudflareCredentials(Closure body) {
                 string(credentialsId: pair.token, variable: 'CF_API_TOKEN'),
                 string(credentialsId: pair.zone, variable: 'CF_ZONE_ID'),
             ]) {
-                echo "Using Cloudflare credentials: token='${pair.token}', zone='${pair.zone}'"
+                echo "Cloudflare 認証情報を使用: token='${pair.token}', zone='${pair.zone}'"
                 body.call()
             }
             return
@@ -348,7 +348,7 @@ def withCloudflareCredentials(Closure body) {
             def message = e.getMessage() ?: ''
             if (message.contains('Could not find credentials entry with ID')) {
                 lastMissingCredentialsError = e
-                echo "Credential IDs not found, trying next pair..."
+                echo '策定 Credential ID が見つかりません。次の候補を試みます…'
                 continue
             }
             throw e
@@ -358,5 +358,5 @@ def withCloudflareCredentials(Closure body) {
     if (lastMissingCredentialsError != null) {
         throw lastMissingCredentialsError
     }
-    error('No Cloudflare credential candidates configured')
+    error('Cloudflare 認証情報の候補が設定されていません。')
 }

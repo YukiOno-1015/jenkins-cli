@@ -137,7 +137,7 @@ spec:
     stages {
         stage('Checkout SCM') {
             steps {
-                echo 'Skipping explicit checkout scm (pipeline source is already loaded from SCM).'
+                echo 'SCM チェックアウトをスキップします（パイプラインソースはSCMから読み込み済み）。'
             }
         }
 
@@ -150,16 +150,16 @@ spec:
                     def organizations = qiitaEngagementUtils.parseCsv(params.TARGET_ORGANIZATIONS)
 
                     if (organizations.isEmpty()) {
-                        error('TARGET_ORGANIZATIONS is empty. Set at least one public organization_url_name.')
+                        error('TARGET_ORGANIZATIONS が空です。公開 organization_url_name を1つ以上指定してください。')
                     }
 
                     if (!params.DO_LIKE && !params.DO_STOCK) {
-                        error('Both DO_LIKE and DO_STOCK are false. Enable at least one action.')
+                        error('DO_LIKE と DO_STOCK が両方 false です。いずれか一方を有効にしてください。')
                     }
 
                     def credentialId = (params.QIITA_TOKEN_CREDENTIAL_ID ?: '').trim()
                     if (!credentialId) {
-                        error('QIITA_TOKEN_CREDENTIAL_ID is empty.')
+                        error('QIITA_TOKEN_CREDENTIAL_ID が空です。')
                     }
 
                     int maxStateIds   = qiitaEngagementUtils.toBoundedInt(params.MAX_STATE_IDS, 5000, 100, 50000)
@@ -189,13 +189,13 @@ spec:
                         httpRetryCount: httpRetry
                     ]
 
-                    echo "Organizations : ${qiitaConfig.organizations.join(', ')}"
-                    echo "Actions       : like=${qiitaConfig.doLike}, stock=${qiitaConfig.doStock}, dryRun=${qiitaConfig.dryRun}"
-                    echo "State file    : ${qiitaConfig.stateFile}"
-                    echo "Max state IDs : ${qiitaConfig.maxStateIds}"
-                    echo "HTTP timeout  : ${qiitaConfig.httpTimeoutSec}s"
-                    echo "HTTP retries  : ${qiitaConfig.httpRetryCount}"
-                    echo "Credential ID : ${qiitaConfig.credentialId}"
+                    echo "対象 Organization    : ${qiitaConfig.organizations.join(', ')}"
+                    echo "実行アクション   : いいね=${qiitaConfig.doLike}, ストック=${qiitaConfig.doStock}, DRY_RUN=${qiitaConfig.dryRun}"
+                    echo "State ファイル    : ${qiitaConfig.stateFile}"
+                    echo "State 最大件数  : ${qiitaConfig.maxStateIds}"
+                    echo "HTTP タイムアウト: ${qiitaConfig.httpTimeoutSec}s"
+                    echo "HTTP リトライ回数: ${qiitaConfig.httpRetryCount}"
+                    echo "Credential ID  : ${qiitaConfig.credentialId}"
                 }
             }
         }
@@ -207,13 +207,13 @@ spec:
                         /*
                          * /authenticated_user で token の有効性と権限を確認。
                          */
-                        def whoami = qiitaGet('/authenticated_user')
+                        def whoami = qiitaEngagementUtils.qiitaGet(qiitaConfig, env.QIITA_API_BASE, '/authenticated_user')
                         if (whoami.code != 200) {
-                            error("Qiita token verification failed: HTTP ${whoami.code}\n${whoami.rawBody}")
+                            error("Qiita トークン検証に失敗しました: HTTP ${whoami.code}\n${whoami.rawBody}")
                         }
 
                         def userId = (whoami.body instanceof Map) ? (whoami.body.id ?: 'unknown') : 'unknown'
-                        echo "Authenticated as: ${userId}"
+                        echo "認証ユーザー: ${userId}"
                     }
                 }
             }
@@ -230,9 +230,9 @@ spec:
                     /*
                      * 既存の処理済み item_id 一覧をロード
                      */
-                    def existingIds = loadStateIds(qiitaConfig.stateFile)
+                    def existingIds = qiitaEngagementUtils.loadStateIds(qiitaConfig.stateFile)
                     def existingSet = existingIds as Set
-                    echo "Loaded state: ${existingIds.size()} processed IDs"
+                    echo "処理済み ID 読込: ${existingIds.size()} 件"
 
                     def targets = []
 
@@ -241,14 +241,14 @@ spec:
                          * 各 Organization について、フィードから記事候補を検出。
                          */
                         for (String orgName : qiitaConfig.organizations) {
-                            def itemIds = discoverOrganizationItemIds(orgName)
+                            def itemIds = qiitaEngagementUtils.discoverOrganizationItemIds(qiitaConfig, orgName)
 
                             if (itemIds.isEmpty()) {
-                                echo "[INFO] No article IDs found from public feed for organization: ${orgName}"
+                                echo "[INFO] Organization の公開フィードから記事 ID が見つかりませんでした: ${orgName}"
                                 continue
                             }
 
-                            echo "Discovered ${itemIds.size()} article IDs from organization feed: ${orgName}"
+                            echo "Organization フィードから ${itemIds.size()} 件の記事 ID を検出: ${orgName}"
 
                             /*
                              * 各 item_id を詳細APIで確認し、
@@ -259,14 +259,14 @@ spec:
                                     continue
                                 }
 
-                                def itemRes = qiitaGet("/items/${itemId}")
+                                def itemRes = qiitaEngagementUtils.qiitaGet(qiitaConfig, env.QIITA_API_BASE, "/items/${itemId}")
                                 if (itemRes.code != 200) {
-                                    echo "[WARN] Failed to fetch item detail: id=${itemId}, HTTP=${itemRes.code}"
+                                    echo "[WARN] 記事詳細の取得失敗: id=${itemId}, HTTP=${itemRes.code}"
                                     continue
                                 }
 
                                 if (!(itemRes.body instanceof Map)) {
-                                    echo "[WARN] Unexpected item detail response: id=${itemId}"
+                                    echo "[WARN] 記事詳細のレスポンスが予期しない形式です: id=${itemId}"
                                     continue
                                 }
 
@@ -278,7 +278,7 @@ spec:
                                  * organization_url_name で最終確認する。
                                  */
                                 if (!itemOrgName || itemOrgName != orgName) {
-                                    echo "[INFO] Skip item not matching target organization: id=${itemId}, expected=${orgName}, actual=${itemOrgName ?: '(none)'}"
+                                    echo "[INFO] 対象 Organization と一致しないため除外: id=${itemId}, 期待=${orgName}, 実際=${itemOrgName ?: '（なし）'}"
                                     continue
                                 }
 
@@ -302,7 +302,7 @@ spec:
                         targets = qiitaEngagementUtils.normalizeTargets(targets)
 
                         if (targets.isEmpty()) {
-                            echo 'No new public organization posts detected.'
+                            echo '新しい公開記事は見つかりませんでした。'
                             return
                         }
 
@@ -316,9 +316,9 @@ spec:
                          * 各記事に対して like / stock を実行。
                          */
                         for (def target : targets) {
-                            echo "Target: [${target.org}] ${target.title} (${target.id})"
-                            echo "URL   : ${target.url}"
-                            echo "Date  : createdAt=${target.createdAt}, updatedAt=${target.updatedAt}"
+                            echo "対象記事: [${target.org}] ${target.title} (${target.id})"
+                            echo "URL     : ${target.url}"
+                            echo "日付    : 作成=${target.createdAt}, 更新=${target.updatedAt}"
 
                             boolean likeOk  = !qiitaConfig.doLike
                             boolean stockOk = !qiitaConfig.doStock
@@ -327,12 +327,12 @@ spec:
                                 /*
                                  * DRY_RUN では API 更新せず、成功扱いで進める。
                                  */
-                                echo "DRY_RUN: skip write actions for ${target.id}"
+                                echo "[DRY_RUN] ${target.id} への書き込みをスキップします。"
                                 likeOk = true
                                 stockOk = true
                             } else {
                                 if (qiitaConfig.doLike) {
-                                    def likeRes = qiitaPut("/items/${target.id}/like")
+                                    def likeRes = qiitaEngagementUtils.qiitaPut(qiitaConfig, env.QIITA_API_BASE, "/items/${target.id}/like")
                                     if (qiitaEngagementUtils.isSuccessCode(likeRes.code)) {
                                         likeOk = true
                                         likedCount++
@@ -342,33 +342,33 @@ spec:
                                          */
                                         likeOk = true
                                         skippedCount++
-                                        echo "[INFO] Like already exists or conflict treated as success: ${target.id}"
+                                        echo "[INFO] いいね済みまたは競合のため成功扱い: ${target.id}"
                                     } else if (qiitaEngagementUtils.isAlreadyLikeResponse(likeRes)) {
                                         likeOk = true
                                         skippedCount++
-                                        echo "[INFO] Like already exists (403 already_liked) treated as success: ${target.id}"
+                                        echo "[INFO] いいね済み（403 already_liked）のため成功扱い: ${target.id}"
                                     } else {
                                         likeOk = false
-                                        echo "[WARN] Like failed: id=${target.id}, HTTP=${likeRes.code}, body=${qiitaEngagementUtils.trimForLog(likeRes.rawBody)}"
+                                        echo "[WARN] いいね失敗: id=${target.id}, HTTP=${likeRes.code}, body=${qiitaEngagementUtils.trimForLog(likeRes.rawBody)}"
                                     }
                                 }
 
                                 if (qiitaConfig.doStock) {
-                                    def stockRes = qiitaPut("/items/${target.id}/stock")
+                                    def stockRes = qiitaEngagementUtils.qiitaPut(qiitaConfig, env.QIITA_API_BASE, "/items/${target.id}/stock")
                                     if (qiitaEngagementUtils.isSuccessCode(stockRes.code)) {
                                         stockOk = true
                                         stockedCount++
                                     } else if (stockRes.code == 409) {
                                         stockOk = true
                                         skippedCount++
-                                        echo "[INFO] Stock already exists or conflict treated as success: ${target.id}"
+                                        echo "[INFO] ストック済みまたは競合のため成功扱い: ${target.id}"
                                     } else if (qiitaEngagementUtils.isAlreadyStockResponse(stockRes)) {
                                         stockOk = true
                                         skippedCount++
-                                        echo "[INFO] Stock already exists (403 already_stocked) treated as success: ${target.id}"
+                                        echo "[INFO] ストック済み（403 already_stocked）のため成功扱い: ${target.id}"
                                     } else {
                                         stockOk = false
-                                        echo "[WARN] Stock failed: id=${target.id}, HTTP=${stockRes.code}, body=${qiitaEngagementUtils.trimForLog(stockRes.rawBody)}"
+                                        echo "[WARN] ストック失敗: id=${target.id}, HTTP=${stockRes.code}, body=${qiitaEngagementUtils.trimForLog(stockRes.rawBody)}"
                                     }
                                 }
                             }
@@ -393,22 +393,22 @@ spec:
 
                         merged = qiitaEngagementUtils.normalizeStateIds(merged, qiitaConfig.maxStateIds)
 
-                        saveStateIds(qiitaConfig.stateFile, merged)
+                        qiitaEngagementUtils.saveStateIds(qiitaConfig.stateFile, merged)
 
-                        echo "Summary:"
-                        echo "  targets    = ${targets.size()}"
-                        echo "  liked      = ${likedCount}"
-                        echo "  stocked    = ${stockedCount}"
-                        echo "  skipped    = ${skippedCount}"
-                        echo "  failed     = ${failedCount}"
-                        echo "  stateSize  = ${merged.size()}"
+                        echo "実行結果:"
+                        echo "  対象記事数 = ${targets.size()}"
+                        echo "  いいね数   = ${likedCount}"
+                        echo "  ストック数 = ${stockedCount}"
+                        echo "  スキップ数 = ${skippedCount}"
+                        echo "  失敗数   = ${failedCount}"
+                        echo "  State件数  = ${merged.size()}"
 
                         /*
                          * 一部失敗がある場合は UNSTABLE にする。
                          */
                         if (failedCount > 0) {
                             currentBuild.result = 'UNSTABLE'
-                            echo 'Some actions failed. Marking build as UNSTABLE.'
+                            echo '一部のアクションが失敗しました。ビルドを UNSTABLE に設定します。'
                         }
                     }
                 }
@@ -418,13 +418,13 @@ spec:
 
     post {
         success {
-            echo 'Qiita public engagement pipeline completed successfully.'
+            echo 'Qiita 公開エンゲージメントパイプラインが正常に完了しました。'
         }
         unstable {
-            echo 'Qiita public engagement pipeline completed with partial failures (UNSTABLE).'
+            echo 'Qiita 公開エンゲージメントパイプラインが一部失敗で完了しました（UNSTABLE）。'
         }
         failure {
-            echo 'Qiita public engagement pipeline failed. Check console log for details.'
+            echo 'Qiita 公開エンゲージメントパイプラインが失敗しました。コンソールログを確認してください。'
         }
         always {
             script {
@@ -500,15 +500,15 @@ def discoverOrganizationItemIds(String orgName) {
             usedUrl = url
             break
         }
-        echo "[INFO] Feed fetch failed or empty: org=${orgName}, url=${url}, HTTP=${res.code}"
+        echo "[INFO] フィード取得失敗またはレスポンスが空: org=${orgName}, url=${url}, HTTP=${res.code}"
     }
 
     if (!feedXml) {
-        echo "[WARN] Could not fetch public feed for organization: ${orgName}"
+        echo "[WARN] Organization の公開フィードを取得できませんでした: ${orgName}"
         return []
     }
 
-    echo "Using organization feed: ${usedUrl}"
+    echo "使用する Organization フィード: ${usedUrl}"
 
     def matcher = (feedXml =~ /https:\/\/qiita\.com\/[^\/<"\s]+\/items\/([A-Za-z0-9]+)/)
     def ids = []
@@ -588,7 +588,7 @@ def httpRequestWithRetry(String method, String url, boolean withAuth, String req
         }
 
         int sleepSec = Math.min(30, attempt * 3)
-        echo "[WARN] Retryable HTTP result for ${method} ${url}: code=${lastRes.code}. Retry ${attempt}/${maxAttempts} after ${sleepSec}s."
+        echo "[WARN] リトライ対象の HTTP 結果 ${method} ${url}: code=${lastRes.code}。リトライ ${attempt}/${maxAttempts}（${sleepSec}秒後）。"
         sleep(time: sleepSec, unit: 'SECONDS')
     }
 

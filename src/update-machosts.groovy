@@ -122,7 +122,7 @@ elif [ -x /usr/local/bin/brew ]; then
 fi
 
 command -v brew >/dev/null 2>&1 || {
-    echo "brew command not found"
+    echo "brew コマンドが見つかりません"
     exit 1
 }
 
@@ -175,7 +175,7 @@ REMOTE_SCRIPT
 
 // ホスト種別に応じて適切な SSH 実行方式と更新コマンドを選択する。
 def runUpdateOnHost = { host, sshUser, macOsSshUser, aptExpiredMetadataWorkaroundHosts, sshCredentialsId ->
-    echo "==== Updating ${host} ===="
+    echo "==== ${host} を更新中 ===="
 
     if (MACOS_HOSTS.contains(host)) {
         runSshAsUser(host, macOsSshUser, buildMacOsUpdateCommand(), sshCredentialsId)
@@ -217,8 +217,8 @@ pipeline {
                     def targetHosts = params.TARGET_HOST == 'ALL' ? TARGET_HOSTS : [params.TARGET_HOST]
                     def sshCredentialsId = params.SSH_CREDENTIALS_ID?.toString()?.trim()
 
-                    echo "Target hosts: ${targetHosts.join(', ')}"
-                    echo "SSH credentials: ${sshCredentialsId ?: 'not specified (without sshagent)'}"
+                    echo "対象ホスト: ${targetHosts.join(', ')}"
+                    echo "SSH 認証情報: ${sshCredentialsId ?: '未指定（sshagent なし）'}"
 
                     for (host in targetHosts) {
                         try {
@@ -229,15 +229,15 @@ pipeline {
                                 APT_EXPIRED_METADATA_WORKAROUND_HOSTS,
                                 sshCredentialsId
                             )
-                            echo "[OK] ${host}"
+                            echo "[成功] ${host}"
                         } catch (Exception e) {
-                            echo "[ERROR] ${host}: ${e.getMessage()}"
+                            echo "[失敗] ${host}: ${e.getMessage()}"
                             failedHosts << host
                         }
                     }
 
                     if (!failedHosts.isEmpty()) {
-                        error("Failed hosts: ${failedHosts.join(', ')}")
+                        error("更新に失敗したホスト: ${failedHosts.join(', ')}")
                     }
                 }
             }
@@ -246,10 +246,10 @@ pipeline {
 
     post {
         success {
-            echo 'All hosts updated successfully'
+            echo 'すべてのホストを正常に更新しました。'
         }
         failure {
-            echo 'Some hosts failed to update. Check logs.'
+            echo '一部のホストの更新に失敗しました。ログを確認してください。'
         }
     }
 }

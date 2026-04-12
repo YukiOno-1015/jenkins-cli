@@ -143,3 +143,230 @@ def normalizeStateIds(List rawIds, int maxSize) {
 
     return result
 }
+
+/*
+ * state ファイルから処理済み item_id を読み込む。
+ */
+def loadStateIds(String stateFilePath) {
+    def output = sh(
+        script: "cat '${shellQuote(stateFilePath)}' 2>/dev/null || true",
+        returnStdout: true
+    ).trim()
+
+    if (!output) {
+        return []
+    }
+
+    return output.readLines()
+        .collect { it.trim() }
+        .findAll { it }
+        .unique()
+}
+
+/*
+ * state ファイルへ処理済み item_id 一覧を書き込む。
+ */
+def saveStateIds(String stateFilePath, List ids) {
+    def content = ids ? (ids.join('\n') + '\n') : ''
+    writeFile(file: stateFilePath, text: content)
+}
+
+/*
+ * Organization の公開フィードから記事ID候補を抽出する。
+ *
+ * まず activities.atom を試し、
+ * 失敗時は /feed をフォールバックとして試す。
+ */
+def discoverOrganizationItemIds(Map cfg, String orgName) {
+    List<String> candidateUrls = [
+        "https://qiita.com/organizations/${orgName}/activities.atom",
+        "https://qiita.com/organizations/${orgName}/feed"
+    ]
+
+    String feedXml = ''
+    String usedUrl = ''
+
+    for (String url : candidateUrls) {
+        def res = httpGetText(cfg, url, false)
+        if (res.code == 200 && (res.body ?: '').toString().trim()) {
+            feedXml = res.body.toString()
+            usedUrl = url
+            break
+        }
+        echo "[INFO] フィード取得失敗またはレスポンスが空: org=${orgName}, url=${url}, HTTP=${res.code}"
+    }
+
+    if (!feedXml) {
+        echo "[WARN] Organization の公開フィードを取得できませんでした: ${orgName}"
+        return []
+    }
+
+    echo "使用する Organization フィード: ${usedUrl}"
+
+    def matcher = (feedXml =~ /https:\/\/qiita\.com\/[^\/<"\s]+\/items\/([A-Za-z0-9]+)/)
+    def ids = []
+
+    while (matcher.find()) {
+        ids << matcher.group(1)
+    }
+
+    return ids.findAll { it }.unique()
+}
+
+/*
+ * Qiita GET ラッパー
+ */
+def qiitaGet(Map cfg, String apiBase, String apiPath) {
+    return qiitaRequest(cfg, apiBase, 'GET', apiPath, null)
+}
+
+/*
+ * Qiita PUT ラッパー
+ */
+def qiitaPut(Map cfg, String apiBase, String apiPath) {
+    return qiitaRequest(cfg, apiBase, 'PUT', apiPath, null)
+}
+
+/*
+ * Qiita API リクエスト共通処理
+ */
+def qiitaRequest(Map cfg, String apiBase, String method, String apiPath, String requestBody) {
+    String url = "${apiBase}${apiPath}"
+    return httpRequestWithRetry(
+        cfg,
+        method,
+        url,
+        true,
+        requestBody,
+        requestBody != null ? 'application/json' : null
+    )
+}
+
+/*
+ * 認証不要な GET 用。
+ * Organization の公開フィード取得などで使用する。
+ */
+def httpGetText(Map cfg, String url, boolean withAuth) {
+    return httpRequestWithRetry(cfg, 'GET', url, withAuth, null, null)
+}
+
+/*
+ * リトライ付き HTTP リクエスト。
+ * リトライ対象: code=0 / 408 / 425 / 429 / 5xx
+ */
+def httpRequestWithRetry(Map cfg, String method, String url, boolean withAuth, String requestBody, String contentType) {
+    int maxAttempts = (cfg?.httpRetryCount ?: 3) as Integer
+    int timeoutSec  = (cfg?.httpTimeoutSec ?: 30) as Integer
+
+    def lastRes = [code: 0, body: '', rawBody: '', headers: '']
+
+    for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+        lastRes = httpRequestOnce(method, url, withAuth, requestBody, contentType, timeoutSec)
+
+        boolean retryable = (
+            lastRes.code == 0 ||
+            lastRes.code == 408 ||
+            lastRes.code == 425 ||
+            lastRes.code == 429 ||
+            (lastRes.code >= 500 && lastRes.code <= 599)
+        )
+
+        if (!retryable || attempt == maxAttempts) {
+            return lastRes
+        }
+
+        int sleepSec = Math.min(30, attempt * 3)
+        echo "[WARN] リトライ対象の HTTP 結果 ${method} ${url}: code=${lastRes.code}。リトライ ${attempt}/${maxAttempts}（${sleepSec}秒後）。"
+        sleep(time: sleepSec, unit: 'SECONDS')
+    }
+
+    return lastRes
+}
+
+/*
+ * HTTP リクエスト単発実行。
+ */
+def httpRequestOnce(String method, String url, boolean withAuth, String requestBody, String contentType, int timeoutSec) {
+    String tokenHeader = withAuth ? '-H "Authorization: Bearer $QIITA_TOKEN"' : ''
+    String contentTypeHeader = contentType ? """-H "Content-Type: ${contentType}" """ : ''
+    String dataOption = ''
+
+    if (requestBody != null) {
+        String escapedBody = requestBody.replace("'", "'\"'\"'")
+        dataOption = "--data '${escapedBody}'"
+    }
+
+    String uid = UUID.randomUUID().toString().replace('-', '')
+    String headerFile = "/tmp/qiita_${uid}.headers"
+    String bodyFile   = "/tmp/qiita_${uid}.body"
+
+    String codeText = sh(
+        script: """
+            set +e
+            curl -sS \\
+              --connect-timeout ${timeoutSec} \\
+              --max-time ${timeoutSec} \\
+              -X ${method} \\
+              ${tokenHeader} \\
+              ${contentTypeHeader} \\
+              ${dataOption} \\
+              -D '${headerFile}' \\
+              -o '${bodyFile}' \\
+              -w '%{http_code}' \\
+              '${url}'
+            rc=\$?
+            if [ "\$rc" -ne 0 ]; then
+              echo 0
+            fi
+        """,
+        returnStdout: true
+    ).trim()
+
+    String headers = sh(
+        script: "cat '${headerFile}' 2>/dev/null || true",
+        returnStdout: true
+    )
+
+    String bodyText = sh(
+        script: "cat '${bodyFile}' 2>/dev/null || true",
+        returnStdout: true
+    )
+
+    sh "rm -f '${headerFile}' '${bodyFile}' 2>/dev/null || true"
+
+    int code
+    try {
+        code = (codeText ?: '0') as Integer
+    } catch (Exception ignored) {
+        code = 0
+    }
+
+    def parsedBody = parseBody(bodyText)
+
+    return [
+        code   : code,
+        body   : parsedBody,
+        rawBody: bodyText ?: '',
+        headers: headers ?: ''
+    ]
+}
+
+/*
+ * レスポンス body を解釈する。
+ */
+def parseBody(String bodyText) {
+    def text = (bodyText ?: '').trim()
+    if (!text) {
+        return [:]
+    }
+
+    if ((text.startsWith('{') && text.endsWith('}')) || (text.startsWith('[') && text.endsWith(']'))) {
+        try {
+            return readJSON(text: text)
+        } catch (Exception ignored) {
+            return text
+        }
+    }
+
+    return text
+}
