@@ -138,10 +138,11 @@ spec:
 
                     def targets = []
                     withCredentials([string(credentialsId: qiitaConfig.credentialId, variable: 'QIITA_TOKEN')]) {
-                        // Organization 専用エンドポイントで絞り込んで取得する
+                        // 検索クエリで Organization を絞り込む（organization: 演算子）
+                        // コロンは URL エンコード（%3A）して送信する
                         for (def orgName in qiitaConfig.organizations) {
                             for (int page = 1; page <= qiitaConfig.maxPages; page++) {
-                                def res = qiitaGet("/organizations/${orgName}/items?page=${page}&per_page=${qiitaConfig.perPage}")
+                                def res = qiitaGet("/items?page=${page}&per_page=${qiitaConfig.perPage}&query=organization%3A${orgName}")
                                 if (res.code != 200) {
                                     error("Failed to fetch items for org '${orgName}': HTTP ${res.code}\n${res.raw}")
                                 }
