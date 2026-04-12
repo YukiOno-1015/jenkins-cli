@@ -252,7 +252,7 @@ def cfGetByPath(String apiPath) {
     def raw = sh(
         script: """curl -s -w '\\n%{http_code}' \\
             -H "Authorization: Bearer \$CF_API_TOKEN" \\
-            "${env.CF_API_BASE}${apiPath}""",
+            ${env.CF_API_BASE}${apiPath}""",
         returnStdout: true
     ).trim()
     return parseResponse(raw)
