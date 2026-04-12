@@ -87,7 +87,7 @@ spec:
 
         booleanParam(
             name: 'DRY_RUN',
-            defaultValue: false,
+            defaultValue: true,
             description: 'true の場合は共有 API に送信せず、収集結果のサマリのみ出力'
         )
     }
@@ -128,8 +128,8 @@ spec:
                     }
 
                     def shareApiUrl = (params.SHARE_API_URL ?: '').trim()
-                    if (!shareApiUrl) {
-                        error('SHARE_API_URL が空です。')
+                    if (!shareApiUrl && !params.DRY_RUN) {
+                        error('SHARE_API_URL が空です。共有送信する場合は URL を設定するか、DRY_RUN=true で収集のみ実行してください。')
                     }
 
                     shareConfig = [
@@ -143,11 +143,15 @@ spec:
                     ]
 
                     echo "対象 Credential IDs: ${shareConfig.credentialIds.join(', ')}"
-                    echo "共有先 API URL: ${shareConfig.shareApiUrl}"
+                    echo "共有先 API URL: ${shareConfig.shareApiUrl ?: '（未設定）'}"
                     echo "HTTP タイムアウト: ${shareConfig.httpTimeoutSec}s"
                     echo "HTTP リトライ回数: ${shareConfig.httpRetryCount}"
                     echo "最大ページ数: ${shareConfig.maxPageCount}"
                     echo "DRY_RUN: ${shareConfig.dryRun}"
+
+                    if (!shareConfig.shareApiUrl) {
+                        echo '[WARN] SHARE_API_URL が未設定のため、今回は収集のみ実行されます。'
+                    }
                 }
             }
         }
