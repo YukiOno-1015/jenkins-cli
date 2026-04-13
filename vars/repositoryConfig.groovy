@@ -22,7 +22,7 @@ def call(String repoNameOrUrl) {
   // SSH リモート配置先の候補はここで共通管理する。
   // 新しい配備先が増えた場合は、このマップへ追記すれば各 Jenkinsfile 側の変更を最小化できる。
   def sharedDeployHostConfigs = [
-    '52.69.235.94': [
+    '52.192.35.208': [
       deployUser: 'ec2-user',
       deploySshCredentialsId: 'github-ssh',
       deployPort: 22
