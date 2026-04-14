@@ -64,11 +64,11 @@ spec:
     }
 
     /*
-     * 10分ごとに起動。
+     * 30分ごとに起動。
      * H を使って負荷分散。
      */
     triggers {
-        cron('TZ=Asia/Tokyo\nH/10 * * * *')
+        cron('TZ=Asia/Tokyo\nH/30 * * * *')
     }
 
     options {
