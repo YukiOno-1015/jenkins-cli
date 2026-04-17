@@ -13,6 +13,11 @@
   - クラスタ時は quorum を確認してから更新
 - `src/declarative-pipeline.groovy`
   - Jenkins 実行ノードのグローバル IP をもとに Cloudflare allowlist を更新
+- `src/monitor-email-alerts.groovy`
+  - IMAP メールボックスを定期監視
+  - 件名 / 宛先 / 送信元 / 本文キーワードでメールを検知
+  - 一致メールを Slack へ通知
+  - `UID` を state JSON に保存して重複通知を防止
 - `src/update-qiita-engagement.groovy`
   - Qiita の Organization 投稿を定期監視
   - 新着記事へ自動で「いいね」「ストック」を付与
@@ -20,8 +25,17 @@
 
 ## 実行基盤
 
-- Jenkins agent: `machost`
-- 実行方式: SSH ベースのリモート実行
+- `src/update-machosts.groovy` / `src/update-proxmox-hosts.groovy` / `src/declarative-pipeline.groovy`
+  - Jenkins agent: `machost`
+  - 実行方式: SSH ベースのリモート実行
+- `src/monitor-email-alerts.groovy`
+  - Jenkins agent: `kubernetes`
+  - 実行方式: Kubernetes Pod ベースのコンテナ実行
+  - state を永続化したい場合は `PVC_CLAIM_NAME` で永続ボリュームをマウントする
+- `src/update-qiita-engagement.groovy`
+  - Jenkins agent: `kubernetes`
+  - 実行方式: Kubernetes Pod ベースのコンテナ実行
+  - `STATE_FILE_PATH` を PVC 配下へ向けると重複処理を防止しやすい
 - スケジュール: 各 pipeline の `cron` 設定に従う
 
 ## 通知と認証情報
@@ -36,6 +50,19 @@
 
 - `CF_API_TOKEN` (Secret text)
 - `CF_ZONE_ID` (Secret text)
+
+### メール監視通知
+
+- `mail-monitor-imap` (Username with password)
+  - IMAP ログイン用
+- `slack-bot-token` (Secret text)
+  - Slack API `chat.postMessage` 用の Bot/User Token
+- `SLACK_CHANNEL` (Jenkins パラメータ)
+  - Slack の通知先チャンネル名またはチャンネル ID
+- `STATE_FILE_PATH` (Jenkins パラメータ)
+  - 監視済み `UID` の保存先
+  - `kubernetes` コンテナ Agent 運用時は PVC 配下を推奨
+  - 例: `/mail-monitor-state/alerts-inbox.json`
 
 ### Qiita 自動エンゲージメント
 

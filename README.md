@@ -1,6 +1,6 @@
 # Jenkins Shared Library
 
-Jenkins 用の共有ライブラリとパイプライン定義を提供するプロジェクトです。Kubernetes 環境での Maven+Node ビルド、GitHub Webhook による自動ビルド、Cloudflare WAF の自動管理機能を含みます。
+Jenkins 用の共有ライブラリとパイプライン定義を提供するプロジェクトです。Kubernetes 環境での Maven+Node ビルド、GitHub Webhook による自動ビルド、Cloudflare WAF の自動管理、IMAP メール監視からの Slack 通知を含みます。
 
 ## 🎯 主な特徴
 
@@ -9,6 +9,7 @@ Jenkins 用の共有ライブラリとパイプライン定義を提供するプ
 - **⚙️ パラメータ削減**: 必要なパラメータを最大90%削減
 - **☸️ Kubernetes対応**: Pod-based agentでビルドを実行
 - **🔍 SonarQube統合**: コード品質分析を自動化
+- **📬 メール監視通知**: IMAP メールボックスを定期監視し、条件一致メールを Slack へ通知
 
 ## 目次
 
@@ -75,6 +76,15 @@ Jenkins 用の共有ライブラリとパイプライン定義を提供するプ
 - `slack-webhook-url` または `discord-webhook-url` を Jenkins Credentials の Secret text として登録すると通知を送信
 - 通知には Jenkins ジョブ URL と結果JSONへのリンクを含める
 
+### 7. 📬 IMAP メール監視パイプライン
+
+- **monitor-email-alerts**: Kubernetes コンテナ Agent 上で IMAP メールボックスを定期監視
+- 件名 / 宛先 / 送信元 / 本文 / 全文横断キーワードで一致判定
+- 一致メールだけを Slack API `chat.postMessage` で通知
+- `UID` ベースの state ファイルを保存して重複通知を防止
+- `PVC_CLAIM_NAME` を指定すると Pod 再作成後も state を保持可能
+- `TEST_NOTIFICATIONS_ONLY=true` で Slack 通知疎通のみ確認可能
+
 ## プロジェクト構成
 
 ```
@@ -86,6 +96,7 @@ jenkins-cli/
 │   ├── UNIFIED_WEBHOOK_SETUP.md            # 統合Webhookパイプラインのセットアップガイド
 │   ├── REPOSITORY_CONFIG_GUIDE.md          # リポジトリ設定管理ガイド
 │   ├── AUTHENTICATION_GUIDE.md              # 認証設定ガイド
+│   ├── MAIL_MONITOR_PIPELINE.md            # IMAP メール監視パイプラインガイド
 │   ├── OPERATIONS_OVERVIEW.md              # 運用系パイプラインの概要
 │   └── templates/local.Jenkins.Agent.launchd.plist # machost用launchdテンプレート
 │
@@ -94,6 +105,7 @@ jenkins-cli/
 │   ├── portalAppPipeline.groovy            # Portal App ビルドパイプライン（簡略化済み）
 │   ├── portalAppBackEndPipeline.groovy     # Portal App Backend ビルドパイプライン（簡略化済み）
 │   ├── declarative-pipeline.groovy         # Cloudflare allowlist 更新パイプライン
+│   ├── monitor-email-alerts.groovy         # IMAP メール監視 → Slack 通知パイプライン
 │   ├── update-machosts.groovy              # Debian/Ubuntu 系 machost 更新パイプライン
 │   └── update-proxmox-hosts.groovy         # Proxmox ホスト監視/更新パイプライン
 │
@@ -149,7 +161,7 @@ flowchart TD
 ```
 
 - build 系の入口は `README.md`、`vars/repositoryConfig.groovy`、`vars/k8sMavenNodePipeline.groovy`、`src/unifiedWebhookPipeline.groovy`
-- 運用系の入口は `src/update-machosts.groovy`、`src/update-proxmox-hosts.groovy`、`src/declarative-pipeline.groovy`
+- 運用系の入口は `src/update-machosts.groovy`、`src/update-proxmox-hosts.groovy`、`src/declarative-pipeline.groovy`、`src/monitor-email-alerts.groovy`
 - macOS 上の Jenkins agent 常駐設定は `docs/templates/local.Jenkins.Agent.launchd.plist` を参照
 
 ## クイックスタート
@@ -600,9 +612,16 @@ def config = repositoryConfig.getCurrent()
 ### 📙 運用概要ガイド
 
 - **[OPERATIONS_OVERVIEW.md](docs/OPERATIONS_OVERVIEW.md)**
-  - machost / Proxmox / Cloudflare 運用パイプラインの責務整理
+  - machost / Proxmox / Cloudflare / メール監視 / Qiita 運用パイプラインの責務整理
   - Jenkins agent・通知・認証情報の運用ポイント
   - SKILL と実ファイルの対応関係
+
+### 📮 メール監視ガイド
+
+- **[MAIL_MONITOR_PIPELINE.md](docs/MAIL_MONITOR_PIPELINE.md)**
+  - IMAP メール監視ジョブのセットアップ手順
+  - キーワード一致ルールと初回同期モード
+  - PVC を使った state 永続化の考え方
 
 ## トラブルシューティング
 
