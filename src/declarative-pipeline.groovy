@@ -262,7 +262,7 @@ def cfGetByPath(String apiPath) {
     withEnv(["CF_API_PATH_TEMPLATE=${apiPath}"]) {
         raw = sh(
             script: '''
-CF_API_PATH="${CF_API_PATH_TEMPLATE//\$CF_ZONE_ID/$CF_ZONE_ID}"
+CF_API_PATH="$(printf '%s' "$CF_API_PATH_TEMPLATE" | awk -v z="$CF_ZONE_ID" '{gsub(/\\$CF_ZONE_ID/, z); print}')"
 curl -s -w "\\n%{http_code}" -H "Authorization: Bearer $CF_API_TOKEN" "$CF_API_BASE$CF_API_PATH"
 ''',
             returnStdout: true
@@ -301,7 +301,7 @@ def cfPatchByPath(String apiPath, Map bodyMap) {
     withEnv(["CF_API_PATH_TEMPLATE=${apiPath}", "CF_TMP_FILE=${tmpFile}"]) {
         raw = sh(
             script: '''
-CF_API_PATH="${CF_API_PATH_TEMPLATE//\$CF_ZONE_ID/$CF_ZONE_ID}"
+CF_API_PATH="$(printf '%s' "$CF_API_PATH_TEMPLATE" | awk -v z="$CF_ZONE_ID" '{gsub(/\\$CF_ZONE_ID/, z); print}')"
 curl -s -w "\\n%{http_code}" -X PATCH -H "Authorization: Bearer $CF_API_TOKEN" -H "Content-Type: application/json" --data "@$CF_TMP_FILE" "$CF_API_BASE$CF_API_PATH"
 ''',
             returnStdout: true
