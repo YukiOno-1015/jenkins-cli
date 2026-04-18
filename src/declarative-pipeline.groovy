@@ -26,7 +26,8 @@ def RULE_DEFS = [
         hosts: [
             'zabbix-cli.sk4869.info',
             'sonarqube-cli.sk4869.info',
-            'jenkins-cli.sk4869.info',
+            'jenkins-cli.sk4869.info', 
+            'pv-cli.sk4869.info',
         ],
     ],
 ]
@@ -257,10 +258,13 @@ def cfGet(String url) {
 
 /** API パス（例: /zones/$CF_ZONE_ID/...）から GET リクエスト */
 def cfGetByPath(String apiPath) {
-    def raw = sh(
-        script: """curl -s -w '\\n%{http_code}' -H "Authorization: Bearer \$CF_API_TOKEN" ${env.CF_API_BASE}${apiPath}""",
-        returnStdout: true
-    ).trim()
+    def raw
+    withEnv(["CF_API_PATH=${apiPath}"]) {
+        raw = sh(
+            script: 'curl -s -w "\\n%{http_code}" -H "Authorization: Bearer $CF_API_TOKEN" "$CF_API_BASE$CF_API_PATH"',
+            returnStdout: true
+        ).trim()
+    }
     return parseResponse(raw)
 }
 
@@ -290,10 +294,13 @@ def cfPatchByPath(String apiPath, Map bodyMap) {
     def tmpFile  = "${env.WORKSPACE}/.cf_patch_body.json"
     writeFile file: tmpFile, text: jsonBody
 
-    def raw = sh(
-        script: """curl -s -w '\\n%{http_code}' -X PATCH -H "Authorization: Bearer \$CF_API_TOKEN" -H 'Content-Type: application/json' --data "@${tmpFile}" ${env.CF_API_BASE}${apiPath}""",
-        returnStdout: true
-    ).trim()
+    def raw
+    withEnv(["CF_API_PATH=${apiPath}", "CF_TMP_FILE=${tmpFile}"]) {
+        raw = sh(
+            script: 'curl -s -w "\\n%{http_code}" -X PATCH -H "Authorization: Bearer $CF_API_TOKEN" -H "Content-Type: application/json" --data "@$CF_TMP_FILE" "$CF_API_BASE$CF_API_PATH"',
+            returnStdout: true
+        ).trim()
+    }
 
     sh "rm -f '${tmpFile}'"
     return parseResponse(raw)
