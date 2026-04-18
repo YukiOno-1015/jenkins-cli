@@ -12,11 +12,11 @@ def TARGET_HOSTS = [
     // さくらサーバ
     'sakura-docker',
     // Proxmox VE サーバ
-    'nico',
-    'umi',
-    'nozomi',
-    'maki',
-    'eri',
+    'pve-nico',
+    'pve-umi',
+    'pve-nozomi',
+    'pve-maki',
+    'pve-eri',
     // トンネルサーバ
     'tunnel01',
     'tunnel02',
@@ -57,11 +57,11 @@ def MACOS_HOSTS = [
 
 // root で直接入るホスト
 def ROOT_LOGIN_HOSTS = [
-    'nico',
-    'umi',
-    'nozomi',
-    'maki',
-    'eri'
+    'pve-nico',
+    'pve-umi',
+    'pve-nozomi',
+    'pve-maki',
+    'pve-eri'
 ]
 
 // どうしても Valid-Until 回避が必要なホストだけ入れる

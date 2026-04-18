@@ -15,11 +15,11 @@
 import com.cloudbees.groovy.cps.NonCPS
 
 def PROXMOX_HOSTS = [
-    'umi',
-    'nozomi',
-    'maki',
-    'eri',
-    'nico',
+    'pve-umi',
+    'pve-nozomi',
+    'pve-maki',
+    'pve-eri',
+    'pve-nico',
 ]
 
 def SLACK_WEBHOOK_CREDENTIAL_ID = 'slack-webhook-url'
