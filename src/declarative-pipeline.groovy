@@ -207,7 +207,7 @@ spec:
                             }
 
                             def patchRes = cfPatchByPath(
-                                "/zones/$CF_ZONE_ID/rulesets/${rulesetId}/rules/${rule.id}",
+                                '/zones/$CF_ZONE_ID/rulesets/' + rulesetId + '/rules/' + rule.id,
                                 patchMap
                             )
 
