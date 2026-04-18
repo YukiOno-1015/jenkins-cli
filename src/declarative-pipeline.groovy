@@ -259,9 +259,12 @@ def cfGet(String url) {
 /** API パス（例: /zones/$CF_ZONE_ID/...）から GET リクエスト */
 def cfGetByPath(String apiPath) {
     def raw
-    withEnv(["CF_API_PATH=${apiPath}"]) {
+    withEnv(["CF_API_PATH_TEMPLATE=${apiPath}"]) {
         raw = sh(
-            script: 'curl -s -w "\\n%{http_code}" -H "Authorization: Bearer $CF_API_TOKEN" "$CF_API_BASE$CF_API_PATH"',
+            script: '''
+CF_API_PATH="${CF_API_PATH_TEMPLATE//\$CF_ZONE_ID/$CF_ZONE_ID}"
+curl -s -w "\\n%{http_code}" -H "Authorization: Bearer $CF_API_TOKEN" "$CF_API_BASE$CF_API_PATH"
+''',
             returnStdout: true
         ).trim()
     }
@@ -295,9 +298,12 @@ def cfPatchByPath(String apiPath, Map bodyMap) {
     writeFile file: tmpFile, text: jsonBody
 
     def raw
-    withEnv(["CF_API_PATH=${apiPath}", "CF_TMP_FILE=${tmpFile}"]) {
+    withEnv(["CF_API_PATH_TEMPLATE=${apiPath}", "CF_TMP_FILE=${tmpFile}"]) {
         raw = sh(
-            script: 'curl -s -w "\\n%{http_code}" -X PATCH -H "Authorization: Bearer $CF_API_TOKEN" -H "Content-Type: application/json" --data "@$CF_TMP_FILE" "$CF_API_BASE$CF_API_PATH"',
+            script: '''
+CF_API_PATH="${CF_API_PATH_TEMPLATE//\$CF_ZONE_ID/$CF_ZONE_ID}"
+curl -s -w "\\n%{http_code}" -X PATCH -H "Authorization: Bearer $CF_API_TOKEN" -H "Content-Type: application/json" --data "@$CF_TMP_FILE" "$CF_API_BASE$CF_API_PATH"
+''',
             returnStdout: true
         ).trim()
     }
