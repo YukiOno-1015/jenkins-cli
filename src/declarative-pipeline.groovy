@@ -294,12 +294,7 @@ def cfPatchByPath(String apiPath, Map bodyMap) {
     writeFile file: tmpFile, text: jsonBody
 
     def raw = sh(
-        script: """curl -s -w '\\n%{http_code}' \\
-            -X PATCH \\
-            -H "Authorization: Bearer \$CF_API_TOKEN" \\
-            -H 'Content-Type: application/json' \\
-            --data "@${tmpFile}" \\
-            "${env.CF_API_BASE}${apiPath}""",
+        script: """curl -s -w '\\n%{http_code}' -X PATCH -H "Authorization: Bearer \$CF_API_TOKEN" -H 'Content-Type: application/json' --data "@${tmpFile}" "${env.CF_API_BASE}${apiPath}""",
         returnStdout: true
     ).trim()
 
