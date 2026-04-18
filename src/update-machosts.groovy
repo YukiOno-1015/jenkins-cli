@@ -32,12 +32,15 @@ def TARGET_HOSTS = [
     'k8s-node04',
     'k8s-node05',
     'k8s-node06',
-    'zabbix',
+    // Vault サーバ
+    'vault01',
+    // Zabbix サーバ
+    'zabbix01',
     // NFSサーバ
     'nfs01',
     'nfs02',
     // 作業用
-    'workstation',
+    'work-ubuntu01',
     // macOS ホスト
     'machost',
     'macmini'
