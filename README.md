@@ -163,6 +163,7 @@ flowchart TD
 - build 系の入口は `README.md`、`vars/repositoryConfig.groovy`、`vars/k8sMavenNodePipeline.groovy`、`src/unifiedWebhookPipeline.groovy`
 - 運用系の入口は `src/update-machosts.groovy`、`src/update-proxmox-hosts.groovy`、`src/declarative-pipeline.groovy`、`src/monitor-email-alerts.groovy`
 - macOS 上の Jenkins agent 常駐設定は `docs/templates/local.Jenkins.Agent.launchd.plist` を参照
+  - 現在のテンプレートは Jenkins agent 用 Java 21 前提
 
 ## クイックスタート
 

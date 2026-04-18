@@ -27,7 +27,7 @@ def RULE_DEFS = [
             'zabbix-cli.sk4869.info',
             'sonarqube-cli.sk4869.info',
             'jenkins-cli.sk4869.info',
-            'pv-svc.sk4869.info',
+            'pv-cli.sk4869.info',
         ],
     ],
 ]
