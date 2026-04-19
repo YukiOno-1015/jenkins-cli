@@ -69,8 +69,10 @@ def call(Map args = [:]) {
     def strictHostKeyChecking = (args.get('strictHostKeyChecking', true) as Boolean)
     def remoteScript = buildRemoteScript(args)
     def remoteEntrypoint = useSudo ? 'sudo -n bash -s' : 'bash -s'
+    def executionMode = args.script ? 'script' : 'command'
 
-    echo "リモート SSH コマンドを実行します: ${host}（ユーザー: ${user}${useSudo ? '、sudo使用' : ''}）"
+    echo "リモート SSH 実行を開始します: ${host}（ユーザー: ${user}${useSudo ? '、sudo使用' : ''}）"
+    echo "SSH接続設定: port=${port}, knownHost=${knownHost}, ホスト鍵検証=${strictHostKeyChecking}, 実行モード=${executionMode}, 標準出力返却=${returnStdout}"
 
     sshagent(credentials: [sshCredentialsId]) {
         def sshScript = """#!/bin/bash
@@ -82,6 +84,7 @@ SSH_PORT=${shellQuote(port.toString())}
 SSH_KNOWN_HOST=${shellQuote(knownHost)}
 
 if ${strictHostKeyChecking ? 'true' : 'false'}; then
+  echo "ホスト鍵検証を有効化し、known_hosts を更新します"
   mkdir -p ~/.ssh
   chmod 700 ~/.ssh
   touch ~/.ssh/known_hosts
@@ -96,6 +99,7 @@ if ${strictHostKeyChecking ? 'true' : 'false'}; then
     -o UserKnownHostsFile="\$HOME/.ssh/known_hosts"
   )
 else
+  echo "警告: ホスト鍵検証を無効化して接続します"
   SSH_HOST_KEY_OPTIONS=(
     -o StrictHostKeyChecking=no
     -o UserKnownHostsFile=/dev/null
@@ -107,16 +111,23 @@ SSH_COMMON_OPTIONS=(
   -o ConnectTimeout=${connectTimeoutSeconds}
 )
 
+echo "SSH接続を開始: \${SSH_TARGET_USER}@\${SSH_TARGET_HOST}:\${SSH_PORT}"
 ssh "\${SSH_COMMON_OPTIONS[@]}" "\${SSH_HOST_KEY_OPTIONS[@]}" -p "\${SSH_PORT}" "\${SSH_TARGET_USER}@\${SSH_TARGET_HOST}" ${shellQuote(remoteEntrypoint)} <<'REMOTE_SCRIPT'
 ${remoteScript}
 REMOTE_SCRIPT
+
+echo "SSH接続処理が完了しました"
 """
 
         if (returnStdout) {
-            return sh(script: sshScript, returnStdout: true).trim()
+            echo '標準出力を取得して呼び出し元へ返します。'
+            def stdout = sh(script: sshScript, returnStdout: true).trim()
+            echo "リモート SSH 実行が完了しました（標準出力 ${stdout.length()} 文字）"
+            return stdout
         }
 
         sh(script: sshScript)
+        echo 'リモート SSH 実行が完了しました。'
         return null
     }
 }

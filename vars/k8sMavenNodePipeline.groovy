@@ -17,7 +17,7 @@ def call(Map cfg = [:]) {
 
     // ---- repositoryConfigから設定を取得 ----
     def repoConfig = repositoryConfig(gitRepoUrl)
-    echo "Using repository configuration for: ${repoConfig.repoName}"
+    echo "リポジトリ設定を読み込みました: ${repoConfig.repoName}"
 
     // ---- 設定の優先順位: 引数 > repositoryConfig > デフォルト値 ----
     def k8sNamespace = cfg.get('namespace', 'jenkins')
@@ -35,7 +35,7 @@ def call(Map cfg = [:]) {
     }
 
     def gitCredSource = requestedGitCredId ? 'pipeline argument' : 'repositoryConfig'
-    echo "Git SSH credentials ID: ${gitSshCredId} (source: ${gitCredSource})"
+    echo "Git SSH 認証情報 ID: ${gitSshCredId}（取得元: ${gitCredSource}）"
 
     def mavenProfileChoices = cfg.get('mavenProfileChoices', repoConfig.buildProfiles)
     def mavenDefaultProfile = cfg.get('mavenDefaultProfile', repoConfig.defaultProfile)
@@ -62,9 +62,9 @@ def call(Map cfg = [:]) {
     def deployKnownHostChoiceList = deployHostConfigs.keySet().findAll { it?.toString()?.trim() }.collect { it.toString().trim() }.sort()
     def deployKnownHostChoices = deployKnownHostChoiceList ? deployKnownHostChoiceList.join('\n') : 'not-configured'
     if (deployKnownHostChoiceList) {
-        echo "Remote deploy host options: ${deployKnownHostChoiceList.join(', ')}"
+        echo "リモート配備ホスト候補: ${deployKnownHostChoiceList.join(', ')}"
     } else {
-        echo "⚠️  Remote deploy host options are not configured for ${repoConfig.repoName}"
+        echo "⚠️  ${repoConfig.repoName} のリモート配備ホスト候補が未設定です"
     }
     def deployTargetDir = cfg.get('deployTargetDir', '/tmp/app-deploy')?.toString()?.trim()
     def deployUseSudo = cfg.containsKey('deployUseSudo') ? cfg.get('deployUseSudo').toString().toBoolean() : false
@@ -82,7 +82,7 @@ def call(Map cfg = [:]) {
         error("SonarQube credentials ID could not be resolved for ${repoConfig.repoName}. Set repositoryConfig.sonarQubeCredentialsId or sonarQubeCredentialsId.")
     }
     def sonarCredSource = requestedSonarCredId ? 'pipeline argument' : (configuredSonarCredId ? 'repositoryConfig' : 'default')
-    echo "SonarQube credentials ID: ${sonarQubeCredId} (source: ${sonarCredSource})"
+    echo "SonarQube 認証情報 ID: ${sonarQubeCredId}（取得元: ${sonarCredSource}）"
 
     def sonarMavenPluginVersion = cfg.get('sonarMavenPluginVersion', '5.5.0.6356')
     def sonarSkipJreProvisioning = cfg.containsKey('sonarSkipJreProvisioning') ? cfg.get('sonarSkipJreProvisioning').toString().toBoolean() : true
@@ -91,7 +91,7 @@ def call(Map cfg = [:]) {
     def sonarQubeUrlRaw = cfg.get('sonarQubeUrl', 'http://sonarqube-app-sonarqube.sonarqube.svc.cluster.local:9000')
     def sonarQubeUrl = sonarQubeUrlRaw?.replaceFirst('^hhttp', 'http')
     if (sonarQubeUrl && !sonarQubeUrl.startsWith('http://') && !sonarQubeUrl.startsWith('https://')) {
-        echo "⚠️  WARNING: sonarQubeUrl has invalid scheme: ${sonarQubeUrl}"
+        echo "⚠️  sonarQubeUrl のスキームが不正です: ${sonarQubeUrl}"
     }
     def sonarProjectName = cfg.get('sonarProjectName', repoConfig.sonarProjectName)
     def sonarBranchSuffix = sanitizeForSonarProjectKey(gitBranch)
@@ -102,6 +102,10 @@ def call(Map cfg = [:]) {
     def memReq = cfg.get('memRequest', repoConfig.k8s.memRequest)
     def cpuLim = cfg.get('cpuLimit', repoConfig.k8s.cpuLimit)
     def memLim = cfg.get('memLimit', repoConfig.k8s.memLimit)
+
+    echo "ビルド設定サマリ: branch=${gitBranch}, profile=${mavenDefaultProfile}, archivePattern=${archivePattern}, skipArchive=${skipArchive}, enableSonarQube=${enableSonarQube}"
+    echo "配備設定サマリ: enableRemoteDeploy=${enableRemoteDeploy}, runDeployCommand=${runDeployCommand}, deployArtifactPattern=${deployArtifactPattern}, deployTargetDir=${deployTargetDir}, deployUploadDir=${deployUploadDir}, deployUseSudo=${deployUseSudo}"
+    echo "Kubernetes 実行設定: namespace=${k8sNamespace}, image=${image}, cpu=${cpuReq}-${cpuLim}, memory=${memReq}-${memLim}, imagePullSecret=${imagePullSecret}"
 
     pipeline {
         agent {
@@ -173,6 +177,7 @@ def call(Map cfg = [:]) {
                         script {
                             // パラメータ入力があれば、それを優先
                             def branch = params.gitBranch ?: gitBranch
+                            echo "Clone ステージ開始: repo=${gitRepoUrl}, branch=${branch}, dir=repo, knownHost=github.com"
                             gitCloneSsh(
                                 repoUrl: gitRepoUrl,
                                 branch: branch,
@@ -195,14 +200,15 @@ def call(Map cfg = [:]) {
                             sh """#!/bin/bash
                               set -euo pipefail
 
-                              echo "=== Preflight: repo/.git and open handles ==="
+                                                            echo "=== 事前確認: repo/.git とオープンハンドル ==="
                               ls -la .git || true
                               lsof | grep repo || true
 
-                              echo "=== Maven Version ==="
+                                                            echo "=== Maven バージョン ==="
                               mvn -v
 
-                              echo "=== Building with profile: ${mavenDefaultProfile} ==="
+                                                            echo "=== ビルド開始: profile=${mavenDefaultProfile} ==="
+                                                            echo "実行コマンド: ${mavenCommand} -P ${mavenDefaultProfile} -DskipTests=false"
 
                               ${mavenCommand} -P "${mavenDefaultProfile}" -DskipTests=false 2>&1 | grep -v "The requested profile" || true
                             """
@@ -224,45 +230,45 @@ def call(Map cfg = [:]) {
                                     sh """#!/bin/bash
                                       set -eo pipefail
 
-                                      echo "=== Maven Version ==="
+                                                                            echo "=== Maven バージョン ==="
                                       mvn -v
 
-                                      echo "=== Running SonarQube Analysis Building with profile: ${mavenDefaultProfile} ==="
-                                      echo "SonarQube URL: ${sonarQubeUrl}"
-                                                                            echo "SonarQube credentials ID: ${sonarQubeCredId}"
-                                                                            echo "Sonar Maven plugin version: ${sonarMavenPluginVersion}"
-                                                                            echo "Sonar skip JRE provisioning: ${sonarSkipJreProvisioning}"
-                                                                            echo "Sonar verbose: ${sonarVerbose}"
-                                                                            echo "Sonar fail-fast on preflight error: ${sonarFailFastOnPreflightError}"
+                                                                            echo "=== SonarQube 解析を開始: profile=${mavenDefaultProfile} ==="
+                                                                            echo "SonarQube URL: ${sonarQubeUrl}"
+                                                                            echo "SonarQube 認証情報 ID: ${sonarQubeCredId}"
+                                                                            echo "Sonar Maven プラグインバージョン: ${sonarMavenPluginVersion}"
+                                                                            echo "Sonar JRE プロビジョニング無効化: ${sonarSkipJreProvisioning}"
+                                                                            echo "Sonar 詳細ログ: ${sonarVerbose}"
+                                                                            echo "Sonar 事前確認失敗時に即時終了: ${sonarFailFastOnPreflightError}"
 
                                       # SONAR_TOKEN の事前検証（-u なしでも明示チェック）
                                       if [ -z "\${SONAR_TOKEN:-}" ]; then
-                                        echo "ERROR: SONAR_TOKEN is empty or not set."
-                                        echo "  Verify that the Jenkins credential '${sonarQubeCredId}' exists and has a valid Secret Text value."
+                                                                                echo "ERROR: SONAR_TOKEN が未設定、または空です。"
+                                                                                echo "  Jenkins 認証情報 '${sonarQubeCredId}' の Secret Text が有効か確認してください。"
                                         exit 1
                                       fi
-                                                                                                                                                        SONAR_TOKEN_CLEAN="\$(printf '%s' "\${SONAR_TOKEN}" | tr -d '\r\n')"
-                                                                                                                                                        if [ -z "\${SONAR_TOKEN_CLEAN}" ]; then
-                                                                                                                                                                echo "ERROR: SONAR_TOKEN becomes empty after trimming CR/LF."
-                                                                                                                                                                echo "  Verify Jenkins credential '${sonarQubeCredId}' does not contain only whitespace/newlines."
-                                                                                                                                                                exit 1
-                                                                                                                                                        fi
-                                                                                                                                                        if [ "\${SONAR_TOKEN_CLEAN}" != "\${SONAR_TOKEN}" ]; then
-                                                                                                                                                                echo "WARNING: SONAR_TOKEN contained CR/LF and was normalized before use."
-                                                                                                                                                        fi
+                                                                            SONAR_TOKEN_CLEAN="\$(printf '%s' "\${SONAR_TOKEN}" | tr -d '\r\n')"
+                                                                            if [ -z "\${SONAR_TOKEN_CLEAN}" ]; then
+                                                                                echo "ERROR: SONAR_TOKEN から改行除去後に空文字になりました。"
+                                                                                echo "  Jenkins 認証情報 '${sonarQubeCredId}' が空白・改行のみでないか確認してください。"
+                                                                                exit 1
+                                                                            fi
+                                                                            if [ "\${SONAR_TOKEN_CLEAN}" != "\${SONAR_TOKEN}" ]; then
+                                                                                echo "警告: SONAR_TOKEN に改行が含まれていたため正規化しました。"
+                                                                            fi
 
-                                                                            echo "=== SonarQube Connectivity Preflight ==="
+                                                                            echo "=== SonarQube 接続性事前確認 ==="
                                                                             SONAR_HTTP_CODE="\$(curl -sS -o /tmp/sonar_server_version.txt -w "%{http_code}" "${sonarQubeUrl}/api/server/version" || true)"
                                                                             SONAR_SERVER_VERSION="\$(cat /tmp/sonar_server_version.txt 2>/dev/null || true)"
-                                                                            echo "SonarQube /api/server/version HTTP status: \${SONAR_HTTP_CODE}"
+                                                                            echo "SonarQube /api/server/version HTTP ステータス: \${SONAR_HTTP_CODE}"
                                                                             if [ -n "\${SONAR_SERVER_VERSION}" ]; then
-                                                                                echo "SonarQube server version: \${SONAR_SERVER_VERSION}"
+                                                                                echo "SonarQube サーバーバージョン: \${SONAR_SERVER_VERSION}"
                                                                             fi
                                                                             if [ "\${SONAR_HTTP_CODE}" = "000" ]; then
-                                                                                echo "WARNING: SonarQube endpoint is unreachable from this pod. Check DNS/network/service URL."
+                                                                                echo "警告: Pod から SonarQube エンドポイントへ到達できません。DNS/ネットワーク/Service URL を確認してください。"
                                                                             fi
 
-                                                                            echo "=== SonarQube Token Preflight ==="
+                                                                            echo "=== SonarQube トークン事前確認 ==="
                                                                             SONAR_AUTH_HTTP_CODE="\$(curl -sS -o /tmp/sonar_auth_validate.json -w "%{http_code}" -H "Authorization: Bearer \${SONAR_TOKEN_CLEAN}" "${sonarQubeUrl}/api/authentication/validate" || true)"
                                                                             SONAR_AUTH_VALID="false"
                                                                             if [ "\${SONAR_AUTH_HTTP_CODE}" = "200" ] && grep -q '"valid"[[:space:]]*:[[:space:]]*true' /tmp/sonar_auth_validate.json 2>/dev/null; then
@@ -270,7 +276,7 @@ def call(Map cfg = [:]) {
                                                                             fi
 
                                                                             if [ "\${SONAR_AUTH_VALID}" != "true" ]; then
-                                                                                echo "Bearer validation did not confirm a valid token (HTTP \${SONAR_AUTH_HTTP_CODE}); retrying with basic token auth."
+                                                                                echo "Bearer 認証で有効トークン判定できませんでした（HTTP \${SONAR_AUTH_HTTP_CODE}）。Basic 方式で再試行します。"
                                                                                 SONAR_AUTH_HTTP_CODE="\$(curl -sS -o /tmp/sonar_auth_validate.json -w "%{http_code}" -u "\${SONAR_TOKEN_CLEAN}:" "${sonarQubeUrl}/api/authentication/validate" || true)"
                                                                                 if [ "\${SONAR_AUTH_HTTP_CODE}" = "200" ] && grep -q '"valid"[[:space:]]*:[[:space:]]*true' /tmp/sonar_auth_validate.json 2>/dev/null; then
                                                                                     SONAR_AUTH_VALID="true"
@@ -278,18 +284,18 @@ def call(Map cfg = [:]) {
                                                                                     SONAR_AUTH_VALID="false"
                                                                                 fi
                                                                             fi
-                                                                            echo "SonarQube /api/authentication/validate HTTP status: \${SONAR_AUTH_HTTP_CODE}"
-                                                                            echo "SonarQube token validate result: \${SONAR_AUTH_VALID}"
+                                                                            echo "SonarQube /api/authentication/validate HTTP ステータス: \${SONAR_AUTH_HTTP_CODE}"
+                                                                            echo "SonarQube トークン検証結果: \${SONAR_AUTH_VALID}"
 
                                                                             if [ "\${SONAR_AUTH_HTTP_CODE}" != "200" ] || [ "\${SONAR_AUTH_VALID}" != "true" ]; then
-                                                                                echo "ERROR: SonarQube token preflight failed (HTTP \${SONAR_AUTH_HTTP_CODE})."
-                                                                                echo "  Verify Jenkins credential '${sonarQubeCredId}' has a valid token with Execute Analysis permission."
+                                                                                echo "ERROR: SonarQube トークン事前確認に失敗しました（HTTP \${SONAR_AUTH_HTTP_CODE}）。"
+                                                                                echo "  Jenkins 認証情報 '${sonarQubeCredId}' に、Execute Analysis 権限を持つ有効トークンを設定してください。"
                                                                                 if [ "${sonarFailFastOnPreflightError}" = "true" ]; then
                                                                                     exit 1
                                                                                 fi
                                                                             fi
 
-                                      echo "=== Building with profile: ${mavenDefaultProfile} ==="
+                                                                            echo "=== ビルド開始: profile=${mavenDefaultProfile} ==="
 
                                       PROJECT_NAME="${sonarProjectName}"
                                                                             mvn -e clean verify -P "${mavenDefaultProfile}" -DskipTests=false \
@@ -407,10 +413,13 @@ def call(Map cfg = [:]) {
                                 "${deployUploadDir}/${path.tokenize('/').last()}"
                             }
 
-                            echo "Remote deploy selection: ${resolvedDeployKnownHost}"
-                            echo "Remote deploy target: ${resolvedDeployUser}@${resolvedDeployHost}:${deployTargetDir}"
-                            echo "Remote upload staging dir: ${deployUploadDir}"
-                            echo "Deployment artifacts: ${matchedArtifacts.join(', ')}"
+                            echo "リモート配備先を解決しました: knownHost=${resolvedDeployKnownHost}, host=${resolvedDeployHost}, user=${resolvedDeployUser}, port=${resolvedDeployPort}"
+                            echo "リモート配備先ディレクトリ: target=${deployTargetDir}, upload=${deployUploadDir}, artifactPattern=${deployArtifactPattern}"
+                            echo "配備対象成果物数: ${matchedArtifacts.size()}"
+                            matchedArtifacts.eachWithIndex { artifactPath, idx ->
+                                echo "  [${idx + 1}] ${artifactPath}"
+                            }
+                            echo "リモート上の成果物パス: ${remoteArtifactPaths.join(', ')}"
 
                             // `deployTargetDir` は最終的な配置先、`deployUploadDir` は scp 用の一時配置先として扱う。
                             // root 配下へ直接 scp できない環境でも、staging 後に deployCommand で sudo 配置できるようにする。
@@ -424,12 +433,13 @@ def call(Map cfg = [:]) {
                                 command: "mkdir -p ${shellQuote(deployUploadDir)}"
                             )
 
-                            sshagent(credentials: [resolvedDeploySshCredId]) {
+                                                        echo "scp で成果物をアップロードします（knownHost=${resolvedDeployKnownHost}, port=${resolvedDeployPort}）"
+                                                        sshagent(credentials: [resolvedDeploySshCredId]) {
                                 sh """#!/bin/bash
                                   set -euo pipefail
 
                                   command -v scp >/dev/null 2>&1 || {
-                                    echo 'scp command not found in build container'
+                                                                        echo 'ERROR: build コンテナに scp コマンドが見つかりません'
                                     exit 1
                                   }
 
@@ -450,13 +460,34 @@ def call(Map cfg = [:]) {
                                   )
 
                                   for artifact in ${matchedArtifacts.collect { shellQuote(it) }.join(' ')}; do
-                                    echo "Uploading \$artifact -> ${resolvedDeployUser}@${resolvedDeployHost}:${deployUploadDir}/"
+                                                                        echo "アップロード開始: \$artifact -> ${resolvedDeployUser}@${resolvedDeployHost}:${deployUploadDir}/"
                                     scp "\${SCP_OPTIONS[@]}" "\$artifact" ${shellQuote("${resolvedDeployUser}@${resolvedDeployHost}:${deployUploadDir}/")}
+                                                                        echo "アップロード成功: \$artifact"
                                   done
                                 """
                             }
 
+                                                        echo "アップロード結果をリモートで確認します（ll 優先、未対応時は ls -l）"
+                                                        remoteSsh(
+                                                                host: resolvedDeployHost,
+                                                                user: resolvedDeployUser,
+                                                                sshCredentialsId: resolvedDeploySshCredId,
+                                                                port: resolvedDeployPort,
+                                                                knownHost: resolvedDeployKnownHost,
+                                                                strictHostKeyChecking: true,
+                                                                command: """
+if command -v ll >/dev/null 2>&1; then
+    echo 'リモート一覧表示: ll を実行します'
+    ll ${shellQuote(deployUploadDir)}
+else
+    echo 'リモート一覧表示: ll がないため ls -l を実行します'
+    ls -l ${shellQuote(deployUploadDir)}
+fi
+""".trim()
+                                                        )
+
                             if (deployCommand?.trim() && params.runDeployCommand) {
+                                                                echo "deployCommand 実行を開始します（sudo=${deployUseSudo}）"
                                 def remoteDeployCommand = """
 export DEPLOY_TARGET_DIR=${shellQuote(deployTargetDir)}
 export DEPLOY_UPLOAD_DIR=${shellQuote(deployUploadDir)}
@@ -476,10 +507,11 @@ ${deployCommand}
                                     strictHostKeyChecking: true,
                                     command: remoteDeployCommand
                                 )
+                                echo 'deployCommand 実行が完了しました。'
                             } else if (deployCommand?.trim()) {
                                 echo 'runDeployCommand=false のため、成果物転送のみ実行しました。'
                             } else {
-                                echo 'deployCommand is empty. Artifact upload only completed.'
+                                echo 'deployCommand が未設定のため、成果物転送のみ実行しました。'
                             }
                         }
                     }
@@ -489,23 +521,24 @@ ${deployCommand}
 
         post {
             success {
-                echo "✅ Build SUCCESS (profile: ${mavenDefaultProfile})"
+                echo "✅ ビルド成功（profile: ${mavenDefaultProfile}）"
             }
             unstable {
-                echo "⚠️ Build UNSTABLE (profile: ${mavenDefaultProfile}) - check SonarQube result and credentials"
+                echo "⚠️ ビルド不安定（profile: ${mavenDefaultProfile}）: SonarQube 結果と認証情報を確認してください"
             }
             failure {
-                echo "❌ Build FAILED - check console logs for details"
+                echo "❌ ビルド失敗: 詳細はコンソールログを確認してください"
             }
             cleanup {
                 script {
                     // Pod 起動失敗/Checkout前失敗などで agent(workspace) が無い場合はスキップ
                     if (!env.NODE_NAME || !env.WORKSPACE) {
-                        echo "🧹 Skip cleanup: agent/workspace not available (NODE_NAME=${env.NODE_NAME}, WORKSPACE=${env.WORKSPACE})"
+                        echo "🧹 クリーンアップをスキップ: agent/workspace が利用不可です（NODE_NAME=${env.NODE_NAME}, WORKSPACE=${env.WORKSPACE}）"
                         return
                     }
 
                     container('build') {
+                        echo '🧹 ワークスペースの権限調整を実行します。'
                         // soften permissions/ownership so workspace cleanup can proceed
                         sh '''#!/bin/bash
                           set -euo pipefail
@@ -513,9 +546,10 @@ ${deployCommand}
                           chmod -R u+rwX . || true
                         '''
                         try {
+                            echo '🧹 deleteDir() でワークスペースを削除します。'
                             deleteDir()
                         } catch (err) {
-                            echo "deleteDir() failed (${err}); fallback to rm -rf"
+                            echo "deleteDir() に失敗したため rm -rf へフォールバックします: ${err}"
                             sh '''#!/bin/bash
                               set -euo pipefail
                               rm -rf -- ./* ./.??* || true

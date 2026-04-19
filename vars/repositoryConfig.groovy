@@ -17,7 +17,7 @@ def call(String repoNameOrUrl) {
     repoName = extractRepoName(repoNameOrUrl)
   }
   
-  echo "Getting configuration for repository: ${repoName}"
+  echo "リポジトリ設定を取得します: ${repoName}"
 
   // SSH リモート配置先の候補はここで共通管理する。
   // 新しい配備先が増えた場合は、このマップへ追記すれば各 Jenkinsfile 側の変更を最小化できる。
@@ -155,8 +155,8 @@ def call(String repoNameOrUrl) {
   def config = configs.get(repoName)
   
   if (!config) {
-    echo "⚠️  WARNING: No configuration found for repository: ${repoName}"
-    echo "Using default configuration"
+    echo "⚠️  リポジトリ設定が未定義です: ${repoName}"
+    echo "デフォルト設定を適用します"
     
     // デフォルト設定
     config = [
@@ -179,7 +179,7 @@ def call(String repoNameOrUrl) {
   
   // デフォルト値の設定（個別設定で省略された項目を補完）
   if (!config.archivePattern) {
-    echo "⚠️  WARNING: archivePattern not defined for ${repoName}, using default"
+    echo "⚠️  archivePattern が未定義のためデフォルト値を適用します: ${repoName}"
     config.archivePattern = '**/target/*.jar'
   }
   
@@ -190,11 +190,17 @@ def call(String repoNameOrUrl) {
   // リポジトリ名を設定に追加
   config.repoName = repoName
   
-  echo "✅ Configuration loaded for ${repoName}"
-  echo "  Credentials: ${config.credentialsId}"
-  echo "  Build Profiles: ${config.buildProfiles}"
-  echo "  Archive Pattern: ${config.archivePattern}"
-  echo "  SonarQube: ${config.sonarProjectName} (enabled: ${config.sonarEnabled})"
+  def deployHostCount = (config.deployHostConfigs instanceof Map) ? config.deployHostConfigs.size() : 0
+  echo "✅ 設定の読み込みが完了しました: ${repoName}"
+  echo "  認証情報ID: ${config.credentialsId}"
+  echo "  ビルドプロファイル: ${config.buildProfiles}"
+  echo "  既定プロファイル: ${config.defaultProfile}"
+  echo "  アーカイブ対象: ${config.archivePattern}"
+  echo "  SonarQube: ${config.sonarProjectName}（有効=${config.sonarEnabled}）"
+  echo "  配備ホスト候補数: ${deployHostCount}"
+  if (deployHostCount > 0) {
+    echo "  配備ホスト候補: ${config.deployHostConfigs.keySet().join(', ')}"
+  }
   
   return config
 }
@@ -216,7 +222,7 @@ def extractRepoName(String repoUrl) {
                       .replaceAll('.git$', '')
                       .split('/')[1]
   } else {
-    echo "⚠️  WARNING: Could not extract repository name from: ${repoUrl}"
+    echo "⚠️  リポジトリ名を抽出できませんでした: ${repoUrl}"
     repoName = 'unknown'
   }
   
@@ -230,7 +236,7 @@ def getCurrent() {
   if (env.GIT_URL) {
     return call(env.GIT_URL)
   } else {
-    echo "⚠️  WARNING: GIT_URL environment variable not found"
+    echo "⚠️  GIT_URL 環境変数が見つかりません"
     return call('unknown')
   }
 }

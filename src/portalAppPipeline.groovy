@@ -120,7 +120,7 @@ sudo systemctl start portal
 echo "サービス状態確認(起動後): portal"
 sudo systemctl status portal --no-pager || true
 
-echo "Staging 成果物: $DEPLOY_FIRST_ARTIFACT"
+echo "ステージング成果物: $DEPLOY_FIRST_ARTIFACT"
 echo "リリース成果物: $release_path"
 echo "=== Portal デプロイ完了 ==="
 ''',
