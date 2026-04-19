@@ -69,24 +69,60 @@ release_path="$release_dir/$artifact_name"
 release_link="$release_dir/portalApp.jar"
 backup_suffix="$(date +%Y%m%d%H%M%S)"
 
+echo "=== Portal デプロイ開始 ==="
+echo "成果物パス: $artifact_path"
+echo "成果物ファイル名: $artifact_name"
+echo "リリースディレクトリ: $release_dir"
+echo "リリース先ファイル: $release_path"
+echo "シンボリックリンク: $release_link"
+
 sudo mkdir -p "$release_dir"
 
 sudo chown "$USER":"$USER" -R "$release_dir"
 
 
+if [ ! -f "$artifact_path" ]; then
+  echo "ERROR: ステージング成果物が見つかりません: $artifact_path"
+  exit 1
+fi
+
 # 既存の旧版 JAR は、今回リリースするものを除いて退避しておく。
 find "$release_dir" -maxdepth 1 -type f -name 'portalApp-*.jar' ! -name "$artifact_name" -print | while read -r old_jar; do
+  echo "旧版JARをバックアップ: $old_jar -> $old_jar.bak_${backup_suffix}"
   sudo mv "$old_jar" "$old_jar.bak_${backup_suffix}"
 done
 
+# 同名ファイルが既にある場合も上書き前にバックアップする。
+if [ -f "$release_path" ]; then
+  echo "同名JARをバックアップ: $release_path -> $release_path.bak_${backup_suffix}"
+  sudo mv "$release_path" "$release_path.bak_${backup_suffix}"
+fi
+
+echo "新しいJARを配置: $artifact_path -> $release_path"
 sudo install -m 0644 "$artifact_path" "$release_path"
+
+echo "シンボリックリンクを切り替え: $release_link -> $release_path"
 sudo rm -f "$release_link"
 sudo ln -s "$release_path" "$release_link"
 
-sudo systemctl restart portal
+echo "サービス状態確認(停止前): portal"
+sudo systemctl status portal --no-pager || true
+
+echo "サービス停止: portal"
+sudo systemctl stop portal
+
+echo "サービス状態確認(停止後): portal"
+sudo systemctl status portal --no-pager || true
+
+echo "サービス起動: portal"
+sudo systemctl start portal
+
+echo "サービス状態確認(起動後): portal"
+sudo systemctl status portal --no-pager || true
 
 echo "Staging 成果物: $DEPLOY_FIRST_ARTIFACT"
 echo "リリース成果物: $release_path"
+echo "=== Portal デプロイ完了 ==="
 ''',
 
   // 以下の設定は repositoryConfig.groovy から自動取得されます:

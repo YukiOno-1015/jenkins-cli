@@ -18,7 +18,8 @@ def call(Map args = [:]) {
     }
 
     def repoUrl   = args.repoUrl
-    def branch    = args.get('branch', 'main')
+    def rawBranch = args.get('branch', 'main')?.toString()?.trim()
+    def branch    = normalizeGitBranchName(rawBranch)
     def dirName   = args.get('dir', 'repo')
     def knownHost = args.get('knownHost', 'github.com')
 
@@ -35,6 +36,9 @@ def call(Map args = [:]) {
     }
 
     echo "Using SSH credentials ID: ${sshCred}"
+    if (rawBranch != branch) {
+        echo "Normalized branch name from '${rawBranch}' to '${branch}'"
+    }
 
     sshagent(credentials: [sshCred]) {
         sh """#!/bin/bash
@@ -78,4 +82,22 @@ def call(Map args = [:]) {
           git log -1 --oneline || true
         """
     }
+}
+
+/**
+ * git clone --branch で受け付ける形へブランチ名を正規化する。
+ */
+private String normalizeGitBranchName(String branch) {
+    if (!branch) {
+        return 'main'
+    }
+
+    def normalized = branch.trim()
+    normalized = normalized.replaceFirst('^refs/heads/', '')
+    normalized = normalized.replaceFirst('^refs/remotes/origin/', '')
+    normalized = normalized.replaceFirst('^remotes/origin/', '')
+    normalized = normalized.replaceFirst('^origin/', '')
+    normalized = normalized.replaceFirst('^\\*/', '')
+
+    return normalized ?: 'main'
 }

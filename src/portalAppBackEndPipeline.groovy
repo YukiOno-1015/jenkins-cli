@@ -62,8 +62,7 @@ k8sMavenNodePipeline(
   deployCommand: '''
 set -euo pipefail
 
-# Backend 側は本体アプリと反映方法が異なる可能性があるため、
-# service 名・配置先・再起動手順は実環境に合わせて調整してください。
+# `DEPLOY_FIRST_ARTIFACT` は、SSH 転送後の staging 側フルパスです。
 artifact_path="$DEPLOY_FIRST_ARTIFACT"
 artifact_name="$(basename "$artifact_path")"
 release_dir="$DEPLOY_TARGET_DIR"
@@ -71,23 +70,58 @@ release_path="$release_dir/$artifact_name"
 release_link="$release_dir/portalApp-Api.jar"
 backup_suffix="$(date +%Y%m%d%H%M%S)"
 
+echo "=== Backend デプロイ開始 ==="
+echo "成果物パス: $artifact_path"
+echo "成果物ファイル名: $artifact_name"
+echo "リリースディレクトリ: $release_dir"
+echo "リリース先ファイル: $release_path"
+echo "シンボリックリンク: $release_link"
+
 sudo mkdir -p "$release_dir"
 sudo chown "$USER":"$USER" -R "$release_dir"
 
-# 旧版 JAR は必要に応じてバックアップ退避する。
-find "$release_dir" -maxdepth 1 -type f -name 'portalApp-Api.jar' ! -name "$artifact_name" -print | while read -r old_jar; do
+if [ ! -f "$artifact_path" ]; then
+  echo "ERROR: ステージング成果物が見つかりません: $artifact_path"
+  exit 1
+fi
+
+# 既存の旧版 JAR は、今回リリースするものを除いて退避しておく。
+find "$release_dir" -maxdepth 1 -type f -name 'portalApp-Api*.jar' ! -name "$artifact_name" -print | while read -r old_jar; do
+  echo "旧版JARをバックアップ: $old_jar -> $old_jar.bak_${backup_suffix}"
   sudo mv "$old_jar" "$old_jar.bak_${backup_suffix}"
 done
 
+# 同名ファイルが既にある場合も上書き前にバックアップする。
+if [ -f "$release_path" ]; then
+  echo "同名JARをバックアップ: $release_path -> $release_path.bak_${backup_suffix}"
+  sudo mv "$release_path" "$release_path.bak_${backup_suffix}"
+fi
+
+echo "新しいJARを配置: $artifact_path -> $release_path"
 sudo install -m 0644 "$artifact_path" "$release_path"
+
+echo "シンボリックリンクを切り替え: $release_link -> $release_path"
 sudo rm -f "$release_link"
 sudo ln -s "$release_path" "$release_link"
 
-# 例: systemd 管理の場合。必要なら service 名や起動方法を変更してください。
-sudo systemctl restart backend
+echo "サービス状態確認(停止前): backend"
+sudo systemctl status backend --no-pager || true
 
-echo "Staging 成果物: $DEPLOY_FIRST_ARTIFACT"
+echo "サービス停止: backend"
+sudo systemctl stop backend
+
+echo "サービス状態確認(停止後): backend"
+sudo systemctl status backend --no-pager || true
+
+echo "サービス起動: backend"
+sudo systemctl start backend
+
+echo "サービス状態確認(起動後): backend"
+sudo systemctl status backend --no-pager || true
+
+echo "ステージング成果物: $DEPLOY_FIRST_ARTIFACT"
 echo "リリース成果物: $release_path"
+echo "=== Backend デプロイ完了 ==="
 ''',
 
   // 以下の設定はrepositoryConfig.groovyから自動取得されます:
