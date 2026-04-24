@@ -57,7 +57,12 @@ k8sMavenNodePipeline(
   // `/opt/portal-app` は最終配置先、scp 転送自体は `/tmp/portal-app` へ staging する。
   deployTargetDir: '/opt/portal-app',
   deployUploadDir: '/tmp/portal-app',
-  deployUseSudo: true,
+  // deployCommand 内で必要な箇所だけ個別に sudo を呼ぶため、
+  // ここでは false にして deployCommand 全体は SSH 実行ユーザーとして走らせる。
+  // true にすると `sudo -n bash -s` 経由で root 実行になり、
+  // deployCommand 内の `$USER` が root に展開され、`chown -R $USER:$USER` が
+  // 実質 no-op となって配置物が root 所有のままになる。
+  deployUseSudo: false,
   deployCommand: '''
 set -euo pipefail
 
