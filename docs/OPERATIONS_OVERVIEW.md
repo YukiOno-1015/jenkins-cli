@@ -22,6 +22,10 @@
   - Qiita の Organization 投稿を定期監視
   - 新着記事へ自動で「いいね」「ストック」を付与
   - 処理済み記事IDを state ファイルへ保存して重複処理を防止
+- `src/network-speedtest.groovy`
+  - 外部 (インターネット) 向けの帯域を定期計測
+  - 結果を 1 つの JSON にまとめて Jenkins コンソール出力 + アーティファクト保存
+  - VIP / Tunnel 等の内部経路は Pod から到達できない可能性が高いため対象外
 
 ## 実行基盤
 
@@ -36,6 +40,10 @@
   - Jenkins agent: `kubernetes`
   - 実行方式: Kubernetes Pod ベースのコンテナ実行
   - `STATE_FILE_PATH` を PVC 配下へ向けると重複処理を防止しやすい
+- `src/network-speedtest.groovy`
+  - Jenkins agent: `kubernetes`
+  - 実行方式: Kubernetes Pod ベースのコンテナ実行（既定イメージ `nicolaka/netshoot:latest`）
+  - `speedtest-cli` を優先利用し、未導入時は `EXTERNAL_FALLBACK_URL` を `curl` でダウンロードして帯域換算
 - スケジュール: 各 pipeline の `cron` 設定に従う
 
 ## 通知と認証情報
