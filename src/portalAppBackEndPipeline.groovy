@@ -58,7 +58,12 @@ k8sMavenNodePipeline(
   // `/opt/backend-api` は最終配置先、scp 転送自体は `/tmp/backend-api` に staging する。
   deployTargetDir: '/opt/backend-api',
   deployUploadDir: '/tmp/backend-api',
-  deployUseSudo: true,
+  // deployCommand 内で必要な箇所だけ個別に sudo を呼ぶため、
+  // ここでは false にして deployCommand 全体は SSH 実行ユーザーとして走らせる。
+  // true にすると `sudo -n bash -s` 経由で root 実行になり、
+  // deployCommand 内の `$USER` が root に展開され、`chown -R $USER:$USER` が
+  // 実質 no-op となって配置物が root 所有のままになる。
+  deployUseSudo: false,
   deployCommand: '''
 set -euo pipefail
 
