@@ -76,9 +76,13 @@ echo "リリースディレクトリ: $release_dir"
 echo "リリース先ファイル: $release_path"
 echo "シンボリックリンク: $release_link"
 
+# リリースディレクトリは初回のみ root 権限で作成し、
+# 以降のファイル操作（mv / install / ln）が sudo なしで完結するように
+# 所有権を SSH 実行ユーザーへ移譲する。
+# 過去に root 所有で配置されたファイルが残っている場合に備え、
+# 配下のファイルもまとめて巻き取り直す。
 sudo mkdir -p "$release_dir"
-
-sudo chown "$USER":"$USER" -R "$release_dir"
+sudo chown -R "$USER":"$USER" "$release_dir"
 
 
 if [ ! -f "$artifact_path" ]; then
@@ -87,23 +91,26 @@ if [ ! -f "$artifact_path" ]; then
 fi
 
 # 既存の旧版 JAR は、今回リリースするものを除いて退避しておく。
+# ディレクトリ所有権は SSH ユーザーに移譲済みのため sudo は不要。
 find "$release_dir" -maxdepth 1 -type f -name 'portalApp-*.jar' ! -name "$artifact_name" -print | while read -r old_jar; do
   echo "旧版JARをバックアップ: $old_jar -> $old_jar.bak_${backup_suffix}"
-  sudo mv "$old_jar" "$old_jar.bak_${backup_suffix}"
+  mv "$old_jar" "$old_jar.bak_${backup_suffix}"
 done
 
 # 同名ファイルが既にある場合も上書き前にバックアップする。
 if [ -f "$release_path" ]; then
   echo "同名JARをバックアップ: $release_path -> $release_path.bak_${backup_suffix}"
-  sudo mv "$release_path" "$release_path.bak_${backup_suffix}"
+  mv "$release_path" "$release_path.bak_${backup_suffix}"
 fi
 
+# install を sudo なしで実行することで、生成 JAR の所有者は SSH ユーザーになる。
 echo "新しいJARを配置: $artifact_path -> $release_path"
-sudo install -m 0644 "$artifact_path" "$release_path"
+install -m 0644 "$artifact_path" "$release_path"
 
+# シンボリックリンクも sudo を外し、リンク自体の所有者を SSH ユーザーに揃える。
 echo "シンボリックリンクを切り替え: $release_link -> $release_path"
-sudo rm -f "$release_link"
-sudo ln -s "$release_path" "$release_link"
+rm -f "$release_link"
+ln -s "$release_path" "$release_link"
 
 echo "サービス状態確認(停止前): portal"
 sudo systemctl status portal --no-pager || true
