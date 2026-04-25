@@ -174,22 +174,30 @@ def runExternalTest(String fallbackUrl) {
     echo '--- 外部向けスピードテスト ---'
     // curl の -w 書式はロケール依存で小数点が ',' になり JSON が壊れることがあるため
     // LC_ALL=C を強制する。speedtest-cli 側も念のため LC_ALL=C で実行する。
+    // また speedtest-cli は環境によって stdout に警告等を混ぜることがあるため、
+    // 出力から最初の '{' 以降のみを取り出して JSON 候補とする。
     def raw = sh(returnStdout: true, script: '''
         set +e
         export LC_ALL=C
         export LANG=C
         if command -v speedtest-cli >/dev/null 2>&1; then
-            out=$(speedtest-cli --secure --json 2>/dev/null)
+            out=$(speedtest-cli --secure --json 2>&1)
             rc=$?
             if [ $rc -eq 0 ] && [ -n "$out" ]; then
-                printf '%s' "$out"
-                exit 0
+                # 最初の '{' 以降を抜き出す (前置警告などを除去)
+                json=$(printf '%s' "$out" | sed -n '/{/,$p')
+                if [ -n "$json" ] && [ "${json#\\{}" != "$json" ]; then
+                    printf '%s' "$json"
+                    exit 0
+                fi
+                # JSON として取り出せなかった場合はマーカー付きで raw を返し、curl にフォールバック
+                printf '__SPEEDTEST_NONJSON__\n%s' "$out"
             fi
         fi
         # フォールバック: curl ダウンロードで bytes/sec を計測
         url="''' + (fallbackUrl ?: '') + '''"
         if [ -z "$url" ]; then
-            printf '{"error":"speedtest-cli unavailable and EXTERNAL_FALLBACK_URL is empty"}'
+            printf '__CURL_FALLBACK_FAILED__\n\n0\nEXTERNAL_FALLBACK_URL is empty'
             exit 0
         fi
         # 数値を改行区切りで取得し、JSON 組み立ては Groovy 側で行う
@@ -203,6 +211,13 @@ def runExternalTest(String fallbackUrl) {
         printf '__CURL_FALLBACK__\n%s\n%s' "$url" "$raw"
     ''').trim()
 
+    // 何が返ってきたかを必ず可視化する (長すぎる場合は切り詰め)
+    def head = raw == null ? '' : raw.toString()
+    if (head.length() > 800) {
+        head = head.substring(0, 800) + '... (truncated)'
+    }
+    echo "external: シェル戻り値 (先頭800文字): ${head}"
+
     // curl フォールバック専用フォーマットを優先処理 (JSON 解析より先)
     if (raw.startsWith('__CURL_FALLBACK__')) {
         return parseCurlFallbackOutput(raw)
@@ -212,19 +227,15 @@ def runExternalTest(String fallbackUrl) {
         return [
             error    : 'curl fallback failed',
             url      : lines.size() > 1 ? lines[1] : null,
-            exit_code: lines.size() > 2 ? lines[2] : null
+            exit_code: lines.size() > 2 ? lines[2] : null,
+            detail   : lines.size() > 3 ? lines[3] : null
         ]
     }
-    def parsed = parseJsonSafely(raw, 'external')
-    // 解析に失敗したときは原因究明のため raw の先頭をログへ出す
-    if (parsed instanceof Map && parsed.error && parsed.raw) {
-        def head = parsed.raw.toString()
-        if (head.length() > 500) {
-            head = head.substring(0, 500) + '... (truncated)'
-        }
-        echo "external: 解析失敗時の raw 出力 (先頭500文字): ${head}"
+    if (raw.startsWith('__SPEEDTEST_NONJSON__')) {
+        // speedtest-cli が rc==0 だが JSON ではなかったケース。raw を保持してエラー扱いにする。
+        return [error: 'speedtest-cli returned non-JSON output', raw: raw.substring('__SPEEDTEST_NONJSON__'.length()).trim()]
     }
-    return parsed
+    return parseJsonSafely(raw, 'external')
 }
 
 /**
@@ -411,6 +422,8 @@ def extractDisplayMetrics(Map results) {
 
 /**
  * シェルから取得した文字列を JSON として安全に解析する。
+ * Jenkins サンドボックスで JsonSlurperClassic#parseText が拒否されるため、
+ * 標準で許可されている Pipeline Utility Steps の readJSON を利用する。
  * 解析失敗時は raw 文字列とエラー内容を保持したマップで返す。
  */
 def parseJsonSafely(String raw, String label) {
@@ -418,7 +431,7 @@ def parseJsonSafely(String raw, String label) {
         return [error: "${label}: empty output".toString()]
     }
     try {
-        return new groovy.json.JsonSlurperClassic().parseText(raw)
+        return readJSON(text: raw)
     } catch (Exception e) {
         echo "${label}: JSON 解析に失敗しました (${e.message})"
         return [error: "${label}: invalid JSON".toString(), raw: raw]
