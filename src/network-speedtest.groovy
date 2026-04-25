@@ -88,6 +88,13 @@ pipeline {
                     // Jenkins コンソールで一目で分かるよう、人間可読のサマリーを先に表示する
                     printSummary(results)
 
+                    // ジョブのトップ画面 (ビルド一覧 / ビルド詳細ページ / Stage View 近辺) で
+                    // 一目で分かるよう、currentBuild.description にサマリーをセットする。
+                    // HTML を許容するよう、Manage Jenkins > Configure Global Security の
+                    // 「Markup Formatter」を Safe HTML 以上に設定している前提。
+                    // 未設定時はタグがそのまま表示されるが主情報は読める。
+                    currentBuild.description = buildBuildDescriptionHtml(results)
+
                     echo '===== 外部ネットワークスピードテスト結果 (JSON) ====='
                     echo jsonText
                     echo '====================================================='
@@ -259,6 +266,77 @@ def printSummary(Map results) {
         echo "  ※ エラー   : ${ext.error}"
     }
     echo '=================================================='
+}
+
+/**
+ * ジョブトップ画面 / ビルド一覧に表示されるサマリー文字列 (HTML) を生成する。
+ * currentBuild.description にセットされ、Stage View 近辺 (ビルド詳細) で表示される。
+ */
+def buildBuildDescriptionHtml(Map results) {
+    def metrics = extractDisplayMetrics(results)
+    def fmt = { Double v -> v == null ? '不明' : String.format('%.2f Mbps', v) }
+    def esc = { Object s ->
+        if (s == null) {
+            return '不明'
+        }
+        return s.toString()
+            .replace('&', '&amp;')
+            .replace('<', '&lt;')
+            .replace('>', '&gt;')
+            .replace('"', '&quot;')
+    }
+    def parts = []
+    parts << "⬇ ダウン: ${esc(fmt(metrics.downMbps))}".toString()
+    parts << "⬆ アップ: ${esc(fmt(metrics.upMbps))}".toString()
+    parts << "サーバ: ${esc(metrics.serverLabel)}".toString()
+    parts << "IP: ${esc(metrics.clientIp)}".toString()
+    if (metrics.error) {
+        parts << "⚠ ${esc(metrics.error)}".toString()
+    }
+    return parts.join(' | ')
+}
+
+/**
+ * 表示用の指標を一箇所で抽出する。
+ * speedtest-cli 形式と curl フォールバック形式の双方に対応し、
+ * printSummary / buildBuildDescriptionHtml の両方から利用される。
+ */
+def extractDisplayMetrics(Map results) {
+    def ext = results?.external instanceof Map ? results.external : [:]
+    Double downMbps = null
+    Double upMbps = null
+    String serverLabel = null
+    String clientIp = results?.publicIp
+    String error = ext?.error
+
+    if (ext?.download != null || ext?.upload != null) {
+        if (ext.download != null) {
+            downMbps = ((ext.download as double) / 1_000_000.0d) as Double
+        }
+        if (ext.upload != null) {
+            upMbps = ((ext.upload as double) / 1_000_000.0d) as Double
+        }
+        if (ext.server instanceof Map) {
+            def s = ext.server
+            serverLabel = [s.sponsor, s.name, s.country, s.host].findAll { it }.join(' / ') ?: null
+        }
+        if (!clientIp && ext.client instanceof Map) {
+            clientIp = ext.client.ip
+        }
+    } else if (ext?.metrics instanceof Map) {
+        def bps = ext.metrics.speed_download_bps
+        if (bps != null) {
+            downMbps = (((bps as double) * 8.0d) / 1_000_000.0d) as Double
+        }
+        serverLabel = (ext.url ?: '(curl fallback)').toString()
+    }
+    return [
+        downMbps   : downMbps,
+        upMbps     : upMbps,
+        serverLabel: serverLabel,
+        clientIp   : clientIp,
+        error      : error
+    ]
 }
 
 /**
