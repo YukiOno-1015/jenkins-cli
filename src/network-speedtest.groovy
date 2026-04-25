@@ -82,7 +82,10 @@ pipeline {
                     results.external = runExternalTest(params.EXTERNAL_FALLBACK_URL?.toString()?.trim())
                     results.finishedAt = new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX", TimeZone.getTimeZone('Asia/Tokyo'))
 
-                    def jsonText = groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson(results))
+                    // readJSON が返す net.sf.json.JSONObject を JsonOutput.toJson で直接シリアライズすると
+                    // 内部の自己参照プロパティを延々辿って StackOverflowError になるため、
+                    // Pipeline Utility Steps の writeJSON(returnText: true) で整形する。
+                    def jsonText = writeJSON(returnText: true, json: results, pretty: 4)
                     def fileName = (params.RESULT_FILE_NAME ?: 'network-speedtest-result.json').toString().trim()
 
                     // Jenkins コンソールで一目で分かるよう、人間可読のサマリーを先に表示する
