@@ -23,7 +23,7 @@ try {
     library 'jqit-lib@main'
 }
 
-@Field String DEFAULT_AGENT_IMAGE = 'python:3.12-slim'
+@Field String DEFAULT_AGENT_IMAGE = 'python:3.14-slim'
 @Field String DEFAULT_STATE_MOUNT_PATH = '/mail-monitor-state'
 @Field String DEFAULT_STATE_FILE_NAME = 'imap-last-uid.json'
 @Field String DEFAULT_IMAP_CREDENTIALS_ID = 'mail-monitor-imap'
