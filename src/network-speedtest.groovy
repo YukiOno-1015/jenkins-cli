@@ -172,8 +172,12 @@ def ensureTools() {
  */
 def runExternalTest(String fallbackUrl) {
     echo '--- 外部向けスピードテスト ---'
+    // curl の -w 書式はロケール依存で小数点が ',' になり JSON が壊れることがあるため
+    // LC_ALL=C を強制する。speedtest-cli 側も念のため LC_ALL=C で実行する。
     def raw = sh(returnStdout: true, script: '''
         set +e
+        export LC_ALL=C
+        export LANG=C
         if command -v speedtest-cli >/dev/null 2>&1; then
             out=$(speedtest-cli --secure --json 2>/dev/null)
             rc=$?
@@ -188,16 +192,82 @@ def runExternalTest(String fallbackUrl) {
             printf '{"error":"speedtest-cli unavailable and EXTERNAL_FALLBACK_URL is empty"}'
             exit 0
         fi
-        # -w で帯域 (B/s) と所要時間を取得
-        metrics=$(curl -L -s -o /dev/null -w '{"speed_download_bps":%{speed_download},"size_download_bytes":%{size_download},"time_total_sec":%{time_total},"http_code":%{http_code}}' "$url" 2>/dev/null)
+        # 数値を改行区切りで取得し、JSON 組み立ては Groovy 側で行う
+        # (curl の -w でカンマ小数や指数表記が混じっても安全に扱うため)
+        raw=$(curl -L -s -o /dev/null -w '%{speed_download}\n%{size_download}\n%{time_total}\n%{http_code}\n' "$url" 2>/dev/null)
         rc=$?
-        if [ $rc -ne 0 ] || [ -z "$metrics" ]; then
-            printf '{"error":"curl fallback failed","url":"%s","exit_code":%d}' "$url" "$rc"
+        if [ $rc -ne 0 ] || [ -z "$raw" ]; then
+            printf '__CURL_FALLBACK_FAILED__\n%s\n%d\n' "$url" "$rc"
             exit 0
         fi
-        printf '{"method":"curl_fallback","url":"%s","metrics":%s}' "$url" "$metrics"
+        printf '__CURL_FALLBACK__\n%s\n%s' "$url" "$raw"
     ''').trim()
-    return parseJsonSafely(raw, 'external')
+
+    // curl フォールバック専用フォーマットを優先処理 (JSON 解析より先)
+    if (raw.startsWith('__CURL_FALLBACK__')) {
+        return parseCurlFallbackOutput(raw)
+    }
+    if (raw.startsWith('__CURL_FALLBACK_FAILED__')) {
+        def lines = raw.readLines()
+        return [
+            error    : 'curl fallback failed',
+            url      : lines.size() > 1 ? lines[1] : null,
+            exit_code: lines.size() > 2 ? lines[2] : null
+        ]
+    }
+    def parsed = parseJsonSafely(raw, 'external')
+    // 解析に失敗したときは原因究明のため raw の先頭をログへ出す
+    if (parsed instanceof Map && parsed.error && parsed.raw) {
+        def head = parsed.raw.toString()
+        if (head.length() > 500) {
+            head = head.substring(0, 500) + '... (truncated)'
+        }
+        echo "external: 解析失敗時の raw 出力 (先頭500文字): ${head}"
+    }
+    return parsed
+}
+
+/**
+ * curl フォールバックのシェル出力を構造化する。
+ * 1 行目: マーカー、2 行目: URL、3 行目以降: speed_download / size_download / time_total / http_code。
+ * 数値を Groovy 側でパースし、最終的に既存の {method, url, metrics: {...}} 形式へ整える。
+ */
+def parseCurlFallbackOutput(String raw) {
+    def lines = raw.readLines()
+    def url = lines.size() > 1 ? lines[1] : null
+    def speedBps = lines.size() > 2 ? toNumberOrNull(lines[2]) : null
+    def sizeBytes = lines.size() > 3 ? toNumberOrNull(lines[3]) : null
+    def timeSec = lines.size() > 4 ? toNumberOrNull(lines[4]) : null
+    def httpCode = lines.size() > 5 ? toNumberOrNull(lines[5]) : null
+    return [
+        method : 'curl_fallback',
+        url    : url,
+        metrics: [
+            speed_download_bps : speedBps,
+            size_download_bytes: sizeBytes,
+            time_total_sec     : timeSec,
+            http_code          : httpCode
+        ]
+    ]
+}
+
+/**
+ * curl 出力の数値を寛容にパースする。
+ * カンマ小数 / 指数表記 / 余計な空白を吸収し、解析できなければ null を返す。
+ */
+def toNumberOrNull(String s) {
+    if (s == null) {
+        return null
+    }
+    def t = s.trim().replace(',', '.')
+    if (!t) {
+        return null
+    }
+    try {
+        return new BigDecimal(t)
+    } catch (Exception ignore) {
+        return null
+    }
 }
 
 /**
