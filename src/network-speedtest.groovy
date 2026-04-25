@@ -78,11 +78,15 @@ pipeline {
                         external : null
                     ]
 
+                    results.publicIp = fetchPublicIp()
                     results.external = runExternalTest(params.EXTERNAL_FALLBACK_URL?.toString()?.trim())
                     results.finishedAt = new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX", TimeZone.getTimeZone('Asia/Tokyo'))
 
                     def jsonText = groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson(results))
                     def fileName = (params.RESULT_FILE_NAME ?: 'network-speedtest-result.json').toString().trim()
+
+                    // Jenkins コンソールで一目で分かるよう、人間可読のサマリーを先に表示する
+                    printSummary(results)
 
                     echo '===== 外部ネットワークスピードテスト結果 (JSON) ====='
                     echo jsonText
@@ -187,6 +191,74 @@ def runExternalTest(String fallbackUrl) {
         printf '{"method":"curl_fallback","url":"%s","metrics":%s}' "$url" "$metrics"
     ''').trim()
     return parseJsonSafely(raw, 'external')
+}
+
+/**
+ * 計測元 Pod から見たグローバル IP を取得する。
+ * 取得に失敗した場合は null を返し、サマリー表示側で「不明」と扱う。
+ * speedtest-cli 利用時も client.ip が含まれるが、curl フォールバック時の手掛かりとして独立に取得しておく。
+ */
+def fetchPublicIp() {
+    def ip = sh(returnStdout: true, script: '''
+        set +e
+        # 複数の取得元をフォールバックしながら試す (どれかが応答すれば良い)
+        for url in https://api.ipify.org https://ifconfig.me/ip https://ipv4.icanhazip.com; do
+            v=$(curl -fsSL --max-time 5 "$url" 2>/dev/null | tr -d " \t\r\n")
+            if [ -n "$v" ]; then
+                printf '%s' "$v"
+                exit 0
+            fi
+        done
+        printf ''
+    ''').trim()
+    return ip ?: null
+}
+
+/**
+ * 人間向けに up/down / サーバ / 自分の IP を整形して echo する。
+ * speedtest-cli 形式と curl フォールバック形式の双方に対応する。
+ */
+def printSummary(Map results) {
+    def ext = results?.external instanceof Map ? results.external : [:]
+    def downMbps = null
+    def upMbps = null
+    def serverLabel = null
+    def clientIp = results?.publicIp
+
+    if (ext?.download != null || ext?.upload != null) {
+        // speedtest-cli --json は bits/s で download / upload を返す
+        if (ext.download != null) {
+            downMbps = (ext.download as double) / 1_000_000.0d
+        }
+        if (ext.upload != null) {
+            upMbps = (ext.upload as double) / 1_000_000.0d
+        }
+        if (ext.server instanceof Map) {
+            def s = ext.server
+            serverLabel = [s.sponsor, s.name, s.country, s.host].findAll { it }.join(' / ')
+        }
+        if (!clientIp && ext.client instanceof Map) {
+            clientIp = ext.client.ip
+        }
+    } else if (ext?.metrics instanceof Map) {
+        // curl フォールバック: speed_download_bps はバイト/秒
+        def bps = ext.metrics.speed_download_bps
+        if (bps != null) {
+            downMbps = ((bps as double) * 8.0d) / 1_000_000.0d
+        }
+        serverLabel = (ext.url ?: '(curl fallback)').toString()
+    }
+
+    def fmt = { Double v -> v == null ? '不明' : String.format('%.2f Mbps', v) }
+    echo '===== 外部ネットワークスピードテスト サマリー ====='
+    echo "  ダウンロード : ${fmt(downMbps)}"
+    echo "  アップロード : ${fmt(upMbps)}"
+    echo "  サーバ       : ${serverLabel ?: '不明'}"
+    echo "  自分の IP    : ${clientIp ?: '不明'}"
+    if (ext?.error) {
+        echo "  ※ エラー   : ${ext.error}"
+    }
+    echo '=================================================='
 }
 
 /**
