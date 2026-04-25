@@ -2,68 +2,78 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
   <dict>
+    <!-- launchd service name -->
     <key>Label</key>
     <string>local.Jenkins.Agent.launchd</string>
 
+    <!--
+      /bin/bash 経由で起動する。
+      macOS のフルディスクアクセス/TCC対策として、run-agent.sh を直接実行しない。
+    -->
     <key>ProgramArguments</key>
     <array>
-      <!-- Jenkins controller / agent の JVM は同じメジャーバージョンに揃える -->
-      <string>/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home/bin/java</string>
-      <string>-jar</string>
-      <string>/Users/your-user/jenkins-agent/agent.jar</string>
-
-      <string>-url</string>
-      <string>https://your-jenkins.example.com/</string>
-
-      <string>-secret</string>
-      <string>@/Users/your-user/jenkins-agent/secret.txt</string>
-
-      <string>-name</string>
-      <string>machost</string>
-
-      <string>-webSocket</string>
-
-      <string>-workDir</string>
-      <string>/Users/your-user/jenkins</string>
+      <string>/bin/bash</string>
+      <string>/Users/your-user/jenkins-agent/run-agent.sh</string>
     </array>
 
+    <!--
+      launchd 自身の作業ディレクトリ。
+      HDDやsymlink先は指定しない。
+    -->
     <key>WorkingDirectory</key>
-    <string>/Users/your-user/jenkins</string>
+    <string>/Users/your-user/jenkins-agent</string>
 
+    <!-- launchd は通常のログインシェル環境を読まないので明示 -->
     <key>EnvironmentVariables</key>
     <dict>
-      <key>PATH</key>
-      <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+      <key>HOME</key>
+      <string>/Users/your-user</string>
+
+      <key>USER</key>
+      <string>your-user</string>
+
+      <key>LOGNAME</key>
+      <string>your-user</string>
+
+      <key>SHELL</key>
+      <string>/bin/zsh</string>
+
+      <key>LANG</key>
+      <string>ja_JP.UTF-8</string>
+
+      <key>LC_ALL</key>
+      <string>ja_JP.UTF-8</string>
+
       <key>JAVA_HOME</key>
       <string>/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home</string>
+
+      <key>PATH</key>
+      <string>/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
     </dict>
 
-    <!-- macOS再起動後に自動起動 -->
+    <!-- macOSログイン時に起動 -->
     <key>RunAtLoad</key>
     <true/>
 
-    <!-- 切断/異常終了時に再起動（瞬断対策） -->
+    <!--
+      agent が終了した場合に再起動。
+      NetworkState は外す。ネットワーク状態変化で変な再起動を避ける。
+    -->
     <key>KeepAlive</key>
     <dict>
-      <key>Crashed</key>
-      <true/>
       <key>SuccessfulExit</key>
       <false/>
-      <key>NetworkState</key>
-      <true/>
     </dict>
 
-    <!-- リトライが過密にならないように間隔を持たせる -->
+    <!-- 再起動が過密にならないようにする -->
     <key>ThrottleInterval</key>
     <integer>10</integer>
 
-    <!-- Loginユーザーセッションで起動（LaunchAgent想定） -->
-    <key>LimitLoadToSessionType</key>
-    <string>Aqua</string>
-
+    <!-- launchd 起動まわりのログ -->
     <key>StandardOutPath</key>
-    <string>/Users/your-user/Library/Logs/jenkins.agent.stdout</string>
+    <string>/Users/your-user/jenkins-agent/launchd.out.log</string>
+
     <key>StandardErrorPath</key>
-    <string>/Users/your-user/Library/Logs/jenkins.agent.stderr</string>
+    <string>/Users/your-user/jenkins-agent/launchd.err.log</string>
   </dict>
 </plist>
