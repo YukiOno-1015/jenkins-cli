@@ -142,18 +142,59 @@ spec:
 /**
  * 計測コマンドの可用性を確認し、不足分はランタイムで導入する。
  * netshoot は Alpine ベースのため apk を利用する。
+ *
+ * 計測コマンドの優先順位:
+ *   1. Ookla 公式 speedtest CLI (`speedtest`)
+ *      - Python 版 speedtest-cli は upload を 0 で返すケースが頻発するため最優先で利用する。
+ *   2. Python 版 speedtest-cli (`speedtest-cli`)
+ *      - Ookla CLI が導入できない環境向けの後方互換フォールバック。
+ *   3. curl による単純ダウンロード計測
+ *      - いずれの speedtest 系ツールも使えない場合の最終フォールバック。
  */
 def ensureTools() {
     sh '''
         set -eu
         echo "--- 利用可能ツールの確認 ---"
         command -v curl          || true
+        command -v speedtest     || true
         command -v speedtest-cli || true
 
         # 不足分の導入 (apk が利用可能な netshoot 前提)
         if ! command -v curl >/dev/null 2>&1 && command -v apk >/dev/null 2>&1; then
             echo "curl を apk で導入"
             apk add --no-cache curl >/dev/null
+        fi
+
+        # Ookla 公式 speedtest CLI を最優先で導入する
+        # 公式リポジトリ (packagecloud) は Alpine 用パッケージを提供していないため、
+        # tarball を /usr/local/bin に展開する方式を採る。
+        if ! command -v speedtest >/dev/null 2>&1; then
+            arch=$(uname -m 2>/dev/null || echo unknown)
+            case "$arch" in
+                x86_64|amd64) ookla_arch=x86_64 ;;
+                aarch64|arm64) ookla_arch=aarch64 ;;
+                armv7l|armv7) ookla_arch=armhf ;;
+                i386|i686) ookla_arch=i386 ;;
+                *) ookla_arch='' ;;
+            esac
+            if [ -n "$ookla_arch" ]; then
+                # Alpine の musl 環境向けに静的リンク版が同梱された Linux tarball を利用する
+                url="https://install.speedtest.net/app/cli/ookla-speedtest-1.2.0-linux-${ookla_arch}.tgz"
+                echo "Ookla speedtest CLI を導入: ${url}"
+                tmpdir=$(mktemp -d)
+                if curl -fsSL --max-time 30 "$url" -o "$tmpdir/ookla.tgz" 2>/dev/null \
+                    && tar -xzf "$tmpdir/ookla.tgz" -C "$tmpdir" 2>/dev/null \
+                    && [ -x "$tmpdir/speedtest" ]; then
+                    install -m 0755 "$tmpdir/speedtest" /usr/local/bin/speedtest \
+                        || cp "$tmpdir/speedtest" /usr/local/bin/speedtest
+                    chmod +x /usr/local/bin/speedtest 2>/dev/null || true
+                else
+                    echo "Ookla speedtest CLI の導入に失敗しました (speedtest-cli / curl 代替へフォールバック予定)"
+                fi
+                rm -rf "$tmpdir" 2>/dev/null || true
+            else
+                echo "未対応アーキテクチャのため Ookla speedtest CLI 導入をスキップ: ${arch}"
+            fi
         fi
 
         # speedtest-cli (Python 版) は無ければ pip で追加 (任意)
@@ -171,18 +212,36 @@ def ensureTools() {
 
 /**
  * 外部向けスピードテストを実施する。
- * speedtest-cli が使える場合は --json をそのまま採用し、失敗時は curl ダウンロード時間で換算する。
+ * 優先順位は Ookla 公式 speedtest -> Python 版 speedtest-cli -> curl ダウンロード計測。
+ * Ookla 公式 CLI は upload も含めて安定して計測できるため最優先で利用する。
  */
 def runExternalTest(String fallbackUrl) {
     echo '--- 外部向けスピードテスト ---'
     // curl の -w 書式はロケール依存で小数点が ',' になり JSON が壊れることがあるため
-    // LC_ALL=C を強制する。speedtest-cli 側も念のため LC_ALL=C で実行する。
-    // また speedtest-cli は環境によって stdout に警告等を混ぜることがあるため、
-    // 出力から最初の '{' 以降のみを取り出して JSON 候補とする。
+    // LC_ALL=C を強制する。speedtest 系も念のため LC_ALL=C で実行する。
+    // 各 CLI の生出力には警告などが混ざることがあるため、JSON は最初の '{' 以降を抽出する。
     def raw = sh(returnStdout: true, script: '''
         set +e
         export LC_ALL=C
         export LANG=C
+
+        # 1) Ookla 公式 speedtest CLI を優先利用する
+        # --accept-license / --accept-gdpr で対話プロンプトを抑止する
+        if command -v speedtest >/dev/null 2>&1; then
+            out=$(speedtest --format=json --accept-license --accept-gdpr 2>&1)
+            rc=$?
+            if [ $rc -eq 0 ] && [ -n "$out" ]; then
+                json=$(printf '%s' "$out" | sed -n '/{/,$p')
+                if [ -n "$json" ] && [ "${json#\\{}" != "$json" ]; then
+                    printf '__OOKLA_JSON__\n%s' "$json"
+                    exit 0
+                fi
+            fi
+            # Ookla CLI が JSON を返さなかった場合は次の手段へフォールバックする
+            echo "Ookla speedtest が JSON を返却しませんでした (rc=${rc}) → speedtest-cli へフォールバック" 1>&2
+        fi
+
+        # 2) Python 版 speedtest-cli を後方互換フォールバックとして試す
         if command -v speedtest-cli >/dev/null 2>&1; then
             out=$(speedtest-cli --secure --json 2>&1)
             rc=$?
@@ -221,7 +280,17 @@ def runExternalTest(String fallbackUrl) {
     }
     echo "external: シェル戻り値 (先頭800文字): ${head}"
 
-    // curl フォールバック専用フォーマットを優先処理 (JSON 解析より先)
+    // Ookla / curl フォールバック専用フォーマットを優先処理 (JSON 解析より先)
+    if (raw.startsWith('__OOKLA_JSON__')) {
+        // マーカー以降の本文だけを取り出して JSON として解析する
+        def body = raw.substring('__OOKLA_JSON__'.length()).replaceFirst(/^\r?\n/, '')
+        def parsed = parseJsonSafely(body, 'external')
+        if (parsed instanceof Map && !parsed.error) {
+            // 後段の整形処理から判別できるよう、Ookla 形式である旨をマーキングする
+            parsed.source = 'ookla'
+        }
+        return parsed
+    }
     if (raw.startsWith('__CURL_FALLBACK__')) {
         return parseCurlFallbackOutput(raw)
     }
@@ -310,35 +379,13 @@ def fetchPublicIp() {
  * speedtest-cli 形式と curl フォールバック形式の双方に対応する。
  */
 def printSummary(Map results) {
+    // 表示用の指標抽出は extractDisplayMetrics に集約済みのため、こちらでは整形と出力のみを行う
+    def metrics = extractDisplayMetrics(results)
+    def downMbps = metrics.downMbps
+    def upMbps = metrics.upMbps
+    def serverLabel = metrics.serverLabel
+    def clientIp = metrics.clientIp
     def ext = results?.external instanceof Map ? results.external : [:]
-    def downMbps = null
-    def upMbps = null
-    def serverLabel = null
-    def clientIp = results?.publicIp
-
-    if (ext?.download != null || ext?.upload != null) {
-        // speedtest-cli --json は bits/s で download / upload を返す
-        if (ext.download != null) {
-            downMbps = (ext.download as double) / 1_000_000.0d
-        }
-        if (ext.upload != null) {
-            upMbps = (ext.upload as double) / 1_000_000.0d
-        }
-        if (ext.server instanceof Map) {
-            def s = ext.server
-            serverLabel = [s.sponsor, s.name, s.country, s.host].findAll { it }.join(' / ')
-        }
-        if (!clientIp && ext.client instanceof Map) {
-            clientIp = ext.client.ip
-        }
-    } else if (ext?.metrics instanceof Map) {
-        // curl フォールバック: speed_download_bps はバイト/秒
-        def bps = ext.metrics.speed_download_bps
-        if (bps != null) {
-            downMbps = ((bps as double) * 8.0d) / 1_000_000.0d
-        }
-        serverLabel = (ext.url ?: '(curl fallback)').toString()
-    }
 
     def fmt = { Double v -> v == null ? '不明' : String.format('%.2f Mbps', v) }
     echo '===== 外部ネットワークスピードテスト サマリー ====='
@@ -393,7 +440,30 @@ def extractDisplayMetrics(Map results) {
     String clientIp = results?.publicIp
     String error = ext?.error
 
-    if (ext?.download != null || ext?.upload != null) {
+    if (ext?.source == 'ookla' || (ext?.download instanceof Map) || (ext?.upload instanceof Map)) {
+        // Ookla 公式 speedtest CLI の JSON 形式
+        // download.bandwidth / upload.bandwidth は bytes/s で返却される
+        def dl = ext.download instanceof Map ? ext.download.bandwidth : null
+        def ul = ext.upload   instanceof Map ? ext.upload.bandwidth   : null
+        if (dl != null) {
+            downMbps = (((dl as double) * 8.0d) / 1_000_000.0d) as Double
+        }
+        if (ul != null) {
+            upMbps = (((ul as double) * 8.0d) / 1_000_000.0d) as Double
+        }
+        if (ext.server instanceof Map) {
+            def s = ext.server
+            def hostPort = s.host
+            if (hostPort && s.port) {
+                hostPort = "${s.host}:${s.port}".toString()
+            }
+            serverLabel = [s.name, s.location, s.country, hostPort].findAll { it }.join(' / ') ?: null
+        }
+        if (!clientIp && ext.interface instanceof Map) {
+            clientIp = ext.interface.externalIp
+        }
+    } else if (ext?.download != null || ext?.upload != null) {
+        // Python 版 speedtest-cli の JSON 形式 (download/upload は bits/s)
         if (ext.download != null) {
             downMbps = ((ext.download as double) / 1_000_000.0d) as Double
         }
