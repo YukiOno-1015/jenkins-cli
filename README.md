@@ -90,8 +90,9 @@ Jenkins 用の共有ライブラリとパイプライン定義を提供するプ
 - **github-copilot-pr-review**: GitHub `pull_request` Webhook を受け取り PR を自動レビュー
 - `@github/copilot` npm パッケージを使って差分を AI 解析（`copilot -p` で非インタラクティブ実行）
 - レビュー結果を PR の通常コメントとして自動投稿
-- Webhook ペイロードの `$.repository.full_name` でリポジトリを動的に判定（複数リポジトリ共有可）
+- Webhook ペイロードの `$.repository.full_name` でリポジトリを動的に判定（同一エンドポイントを複数リポジトリで共有可）
 - opened / synchronize / reopened イベントのみに反応
+- **注意**: `jqit-github-token`（Fine-grained PAT）はリポジトリごとに token 側の repository access 許可が必要。新しいリポジトリを向けるだけでは Copilot CLI が 403 になる場合がある
 
 ## プロジェクト構成
 
@@ -266,15 +267,15 @@ jenkins-cli install-plugin workflow-aggregator git ssh-agent kubernetes credenti
 
 以下の認証情報を Jenkins に登録する必要があります：
 
-| ID                        | 種別                          | 登録先     | 説明                       | 使用箇所                |
-| ------------------------- | ----------------------------- | ---------- | -------------------------- | ----------------------- |
-| `JQIT_ONO`                | SSH Username with private key | Jenkins    | GitHub SSH 認証鍵          | repositoryConfig で設定 |
-| `dockerhub-jenkins-agent` | docker-registry Secret        | Kubernetes | Docker Hub imagePullSecret | k8sPodYaml              |
-| `sonarQubeCredId`         | Secret text                   | Jenkins    | SonarQube認証トークン      | k8sMavenNodePipeline    |
-| `CF_API_TOKEN`              | Secret text                   | Jenkins    | Cloudflare API トークン                                    | declarative-pipeline         |
-| `CF_ZONE_ID`                | Secret text                   | Jenkins    | Cloudflare ゾーン ID                                       | declarative-pipeline         |
-| `jqit-github-token`         | Secret text                   | Jenkins    | GitHub Fine-grained PAT（Copilot CLI 認証用）              | github-copilot-pr-review     |
-| `jqit-github-token-classic` | Secret text                   | Jenkins    | GitHub Classic PAT（PR コメント投稿用、`repo` スコープ）   | github-copilot-pr-review     |
+| ID                          | 種別                          | 登録先     | 説明                       | 使用箇所                 |
+| --------------------------- | ----------------------------- | ---------- | -------------------------- | ------------------------ |
+| `JQIT_ONO`                  | SSH Username with private key | Jenkins    | GitHub SSH 認証鍵          | repositoryConfig で設定  |
+| `dockerhub-jenkins-agent`   | docker-registry Secret        | Kubernetes | Docker Hub imagePullSecret | k8sPodYaml               |
+| `sonarQubeCredId`           | Secret text                   | Jenkins    | SonarQube認証トークン      | k8sMavenNodePipeline     |
+| `CF_API_TOKEN`              | Secret text                   | Jenkins    | Cloudflare API トークン    | declarative-pipeline     |
+| `CF_ZONE_ID`                | Secret text                   | Jenkins    | Cloudflare ゾーン ID       | declarative-pipeline     |
+| `jqit-github-token`         | Secret text                   | Jenkins    | Copilot CLI 認証用 PAT     | github-copilot-pr-review |
+| `jqit-github-token-classic` | Secret text                   | Jenkins    | PR コメント投稿用 PAT      | github-copilot-pr-review |
 
 **注意**: 認証情報IDは `vars/repositoryConfig.groovy` で設定できます。
 
@@ -408,25 +409,35 @@ unifiedWebhookPipeline()
 ```
 Payload URL : https://<jenkins-host>/generic-webhook-trigger/invoke?token=github-copilot-pr-review
 Content type: application/json
+Secret      : <任意の秘密文字列>  ← 必ず設定すること（後述）
 Events      : Pull requests
 ```
 
-複数リポジトリから同一 URL を向けても `$.repository.full_name` でリポジトリを動的に判定するため追加設定は不要です。
+> **セキュリティ要件: Webhook secret の設定**
+> `?token=...` の URL だけでは、その URL を知る第三者が偽の `pull_request` ペイロードを送れてしまいます。
+> GitHub の Webhook secret を設定して `X-Hub-Signature-256` ヘッダーによる署名検証を行ってください。
+> Generic Webhook Trigger Plugin では `secretToken` または `hmacHeader`/`hmacAlgorithm` オプションで検証できます。
+> 参考: [Securing your webhooks - GitHub Docs](https://docs.github.com/en/webhooks/using-webhooks/securing-your-webhooks)
+>
+> **Fine-grained PAT のリポジトリアクセス設定**
+> `$.repository.full_name` でリポジトリを動的に判定するため同一エンドポイントを複数リポジトリで共有できますが、
+> `jqit-github-token`（Fine-grained PAT）は **PAT 側でリポジトリごとに repository access を許可しなければなりません**。
+> 新しいリポジトリを Webhook URL に向けるだけでは Copilot CLI が 403 になります。PAT の設定も忘れずに更新してください。
 
 **動作フロー**
 
-1. PR が opened / synchronize / reopened されると Webhook を受信
-2. `honoka4869/jenkins-maven-node` コンテナ上で `npm install -g @github/copilot` を実行
+1. PR が opened / synchronize / reopened されると Webhook を受信（署名検証済み）
+2. `honoka4869/jenkins-maven-node` コンテナ上で `npm install -g @github/copilot@<version>` を実行
+   - **バージョンを固定すること**。固定しない場合、upstream の破壊的更新や npm 障害がそのままレビュー停止に直結する
+   - **推奨**: Docker イメージに事前組み込みにすることで毎回のインストールコストと不安定さを解消できる
 3. GitHub API から PR の diff を取得（`jqit-github-token-classic` で認証）
 4. `copilot -p "..."` で AI レビューを生成（`jqit-github-token` の Copilot 権限で認証）
 5. GitHub Issues API で PR に通常コメントとして投稿
 
 **必要な Jenkins Credentials**
 
-| ID | 種別 | 説明 |
-|----|------|------|
-| `jqit-github-token` | Secret text | GitHub Fine-grained PAT（Copilot CLI 認証用） |
-| `jqit-github-token-classic` | Secret text | GitHub Classic PAT（PR コメント投稿用、`repo` スコープ） |
+- `jqit-github-token` — GitHub Fine-grained PAT（Copilot CLI 認証用、対象リポジトリごとに repository access 許可が必要）
+- `jqit-github-token-classic` — GitHub Classic PAT（PR コメント投稿用、`repo` スコープ）
 
 ### 従来型パイプライン
 
