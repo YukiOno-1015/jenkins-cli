@@ -160,10 +160,17 @@ echo "差分サイズ: ${DIFF_SIZE} bytes"
 # これを超える PR は先頭のみレビューし、コメント末尾に元サイズと併せて明示する。
 DIFF_MAX_BYTES=100000
 if [ "${DIFF_SIZE}" -gt "${DIFF_MAX_BYTES}" ]; then
-    head -c "${DIFF_MAX_BYTES}" /tmp/pr_diff.patch > /tmp/pr_diff_trim.patch
+    # head -c はバイト単位で切るため、UTF-8 のマルチバイト文字の途中で
+    # 切断され不正なバイト列が混入する可能性がある。日本語を含む diff で
+    # Copilot への入力品質を落とさないよう、iconv -c で不正バイトを除去し
+    # UTF-8 として整合した状態に正規化する。
+    head -c "${DIFF_MAX_BYTES}" /tmp/pr_diff.patch \
+        | iconv -f UTF-8 -t UTF-8 -c \
+        > /tmp/pr_diff_trim.patch
     mv /tmp/pr_diff_trim.patch /tmp/pr_diff.patch
-    TRUNCATED_NOTE=" ※差分が大きいため先頭 ${DIFF_MAX_BYTES} バイトのみレビュー対象 (元サイズ: ${DIFF_SIZE} bytes)"
-    echo "差分を ${DIFF_MAX_BYTES} バイトに切り詰めました。"
+    TRIMMED_SIZE=$(wc -c < /tmp/pr_diff.patch)
+    TRUNCATED_NOTE=" ※差分が大きいため先頭 ${DIFF_MAX_BYTES} バイトを UTF-8 境界で整形してレビュー対象 (元サイズ: ${DIFF_SIZE} bytes / 切り詰め後: ${TRIMMED_SIZE} bytes)"
+    echo "差分を ${DIFF_MAX_BYTES} バイトに切り詰めました (UTF-8 整形後: ${TRIMMED_SIZE} bytes)。"
 fi
 
 DIFF_CONTENT=$(cat /tmp/pr_diff.patch)
@@ -171,8 +178,12 @@ DIFF_CONTENT=$(cat /tmp/pr_diff.patch)
 # Copilot がレビュー時刻を学習データ (2025 年前後) のまま扱うと、
 # 「日付が未来になっている」「ライブラリのバージョンが新しすぎる」等の誤指摘を
 # 出すケースがあるため、現在日時 (UTC / JST) をプロンプトに明示注入する。
+#
+# JST は zoneinfo (Asia/Tokyo) を必要としない POSIX TZ 文字列 "JST-9" で生成する。
+# tzdata 未導入のコンテナでも動作し、レビュー本筋と無関係な日時注入で
+# ジョブが失敗するリスクを避ける。
 NOW_UTC=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
-NOW_JST=$(TZ=Asia/Tokyo date +"%Y-%m-%d %H:%M:%S JST")
+NOW_JST=$(TZ="JST-9" date +"%Y-%m-%d %H:%M:%S JST")
 echo "現在日時 (UTC): ${NOW_UTC} / (JST): ${NOW_JST}"
 
 echo "--- Copilot CLI でレビューを生成（-p フラグで非インタラクティブ実行）---"
