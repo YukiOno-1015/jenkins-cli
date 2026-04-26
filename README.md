@@ -422,9 +422,13 @@ Events      : Pull requests
 
 **必要な Jenkins Credential**
 
-| ID | 種別 | 説明 |
-|----|------|------|
+<!-- markdownlint-disable MD060 -->
+
+| ID                  | 種別        | 説明                                                              |
+|---------------------|-------------|-------------------------------------------------------------------|
 | `jqit-github-token` | Secret text | GitHub PAT（repo スコープ、Copilot サブスクリプション必須） |
+
+<!-- markdownlint-enable MD060 -->
 
 ### 従来型パイプライン
 
