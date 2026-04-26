@@ -1,20 +1,33 @@
 /*
- * GitHub pull_request Webhook を受け取り、GitHub Copilot CLI で PR をレビューして
- * PR に通常コメントとして投稿する Declarative Pipeline です。
+ * GitHub pull_request Webhook を受け取り、対象 PR にレビュアーとして
+ * GitHub Copilot Code Review（bot）を割り当てる Declarative Pipeline です。
+ *
+ * 設計方針:
+ *   - Jenkins 側で Copilot CLI を実行してレビューを生成・コメント投稿する方式は廃止し、
+ *     GitHub 公式の Copilot Code Review に肩代わりさせる。
+ *   - Jenkins からは PR のレビュアーに `copilot-pull-request-reviewer` を追加するだけ。
+ *   - レビュー本文は Copilot Code Review が PR コメント／レビューコメントとして自動投稿する。
+ *
+ * 利点:
+ *   - 必要な PAT 権限が Pull requests: write のみで済む（Issues 権限不要）。
+ *   - Copilot CLI の実行・差分の整形・コメント投稿のロジックがすべて不要になる。
+ *   - レビュー品質・更新は GitHub 側に追従する。
  *
  * 動作フロー:
  *   1. GitHub から pull_request イベント Webhook を受信する（opened / synchronize / reopened）
  *   2. ペイロードの $.repository.full_name からリポジトリを動的に取得する
- *   3. honoka4869/jenkins-maven-node イメージ（npm 内蔵）に @github/copilot をインストールする
- *   4. GitHub API で PR の diff を取得し、copilot -p でレビューを生成する
- *   5. GitHub Issues API で PR に通常コメントとして投稿する
+ *   3. GitHub Pull Requests API でレビュアーに `copilot-pull-request-reviewer` を追加する
  *
  * 必要な Jenkins Credentials（Kind: Secret text）:
  *   jqit-github-token : GitHub Personal Access Token
- *                       必要スコープ: repo（コメント書き込み）
- *                       ※ GitHub Copilot CLI で利用するには Copilot サブスクリプション
- *                         （Individual / Business / Enterprise）に紐づくアカウントの PAT が必要
- *                       ※ fine-grained PAT を使う場合は "Copilot Requests" 権限を有効化すること
+ *                       Fine-grained PAT 推奨
+ *                       必要権限: Repository permissions
+ *                                 - Pull requests: Read and write
+ *                                 - Metadata: Read-only
+ *                       ※ 対象リポジトリの所有者と PAT の Resource owner が異なる場合は
+ *                         事前にコラボレーター招待・承認を済ませること
+ *                       ※ Copilot Code Review はリポジトリ側で有効化が必要
+ *                         （Settings → Code & automation → Copilot code review）
  *
  * 必要な Jenkins プラグイン:
  *   - Generic Webhook Trigger Plugin
@@ -32,7 +45,7 @@ pipeline {
     agent {
         kubernetes {
             defaultContainer 'build'
-            // @github/copilot の npm インストールに十分なリソースを確保する
+            // curl だけ動けばよいので軽量な構成にとどめる
             yaml '''
 apiVersion: v1
 kind: Pod
@@ -44,11 +57,11 @@ spec:
     tty: true
     resources:
       requests:
-        cpu: "500m"
-        memory: "1Gi"
+        cpu: "100m"
+        memory: "256Mi"
       limits:
-        cpu: "2"
-        memory: "2Gi"
+        cpu: "500m"
+        memory: "512Mi"
 '''
         }
     }
@@ -68,6 +81,7 @@ spec:
             causeString: 'GitHub PR #$PR_NUMBER ($WEBHOOK_ACTION) by $SENDER_LOGIN — $REPO_FULL_NAME',
             token: 'github-copilot-pr-review',
             // opened / synchronize / reopened 以外のアクションは無視する
+            // synchronize（追加コミット）でも再リクエストされるが、Copilot 側で重複は適切にハンドリングされる
             regexpFilterText: '$WEBHOOK_ACTION',
             regexpFilterExpression: '^(opened|synchronize|reopened)$'
         )
@@ -75,9 +89,14 @@ spec:
 
     options {
         buildDiscarder(logRotator(numToKeepStr: '20'))
-        timeout(time: 20, unit: 'MINUTES')
+        timeout(time: 5, unit: 'MINUTES')
         timestamps()
         skipDefaultCheckout(true)
+    }
+
+    environment {
+        // Copilot Code Review の bot ユーザー名（GitHub 側で固定）
+        COPILOT_REVIEWER_LOGIN = 'copilot-pull-request-reviewer'
     }
 
     stages {
@@ -88,166 +107,69 @@ spec:
                     if (!env.PR_NUMBER?.trim() || !env.REPO_FULL_NAME?.trim()) {
                         error('Webhook ペイロードから PR 番号またはリポジトリ名を取得できませんでした。Generic Webhook Trigger の設定を確認してください。')
                     }
-                    echo "=== GitHub Copilot PR レビューパイプライン ==="
-                    echo "リポジトリ  : ${env.REPO_FULL_NAME}"
-                    echo "PR 番号     : ${env.PR_NUMBER}"
-                    echo "タイトル    : ${env.PR_TITLE}"
-                    echo "ブランチ    : ${env.PR_HEAD_REF}"
-                    echo "SHA         : ${env.PR_HEAD_SHA}"
-                    echo "アクション  : ${env.WEBHOOK_ACTION}"
-                    echo "投稿者      : ${env.SENDER_LOGIN}"
+                    echo "=== GitHub Copilot Code Review レビュアー指定パイプライン ==="
+                    echo "リポジトリ      : ${env.REPO_FULL_NAME}"
+                    echo "PR 番号         : ${env.PR_NUMBER}"
+                    echo "タイトル        : ${env.PR_TITLE}"
+                    echo "ブランチ        : ${env.PR_HEAD_REF}"
+                    echo "SHA             : ${env.PR_HEAD_SHA}"
+                    echo "アクション      : ${env.WEBHOOK_ACTION}"
+                    echo "投稿者          : ${env.SENDER_LOGIN}"
+                    echo "指定レビュアー  : ${env.COPILOT_REVIEWER_LOGIN}"
                 }
             }
         }
 
-        stage('Setup GitHub Copilot CLI') {
-            steps {
-                sh '''#!/bin/sh
-set -e
-echo "--- @github/copilot をグローバルインストール ---"
-npm install -g @github/copilot
-
-echo "--- バージョン確認 ---"
-copilot --version || true
-'''
-            }
-        }
-
-        stage('Review & Post Comment') {
+        stage('Request Copilot Review') {
             steps {
                 withCredentials([string(credentialsId: 'jqit-github-token', variable: 'GITHUB_TOKEN')]) {
                     sh '''#!/bin/sh
 set -e
-# copilot CLI v1.0.36 は GH_TOKEN > GITHUB_TOKEN の順に参照する。
-# withCredentials で GITHUB_TOKEN が既に設定されているため、優先される GH_TOKEN にも同じ値を流して明示する。
-export GH_TOKEN="${GITHUB_TOKEN}"
-TRUNCATED_NOTE=""
 
-echo "--- copilot CLI 認証状態の確認（失敗してもパイプラインは継続）---"
-copilot --version || true
+echo "--- PR #${PR_NUMBER} のレビュアーに Copilot Code Review を追加 ---"
 
-echo "--- PR #${PR_NUMBER} の差分を取得（GitHub API）---"
-curl -fsSL \
-    -H "Authorization: Bearer ${GITHUB_TOKEN}" \
-    -H "Accept: application/vnd.github.v3.diff" \
-    "https://api.github.com/repos/${REPO_FULL_NAME}/pulls/${PR_NUMBER}" \
-    > /tmp/pr_diff.patch
-
-DIFF_SIZE=$(wc -c < /tmp/pr_diff.patch)
-echo "差分サイズ: ${DIFF_SIZE} bytes"
-
-# copilot -p の引数長上限を考慮して先頭 10,000 バイトに切り詰める
-if [ "${DIFF_SIZE}" -gt 10000 ]; then
-    head -c 10000 /tmp/pr_diff.patch > /tmp/pr_diff_trim.patch
-    mv /tmp/pr_diff_trim.patch /tmp/pr_diff.patch
-    TRUNCATED_NOTE=" ※差分が大きいため先頭 10,000 バイトのみレビュー対象"
-    echo "差分を切り詰めました。"
-fi
-
-DIFF_CONTENT=$(cat /tmp/pr_diff.patch)
-
-echo "--- Copilot CLI でレビューを生成（-p フラグで非インタラクティブ実行）---"
-# stdout / stderr をそれぞれファイルへ分離し、失敗時は stderr をジョブログへ出力する。
-# 以前の `$(cmd 2>&1) || fallback` 方式は失敗時のエラー詳細を握り潰してしまうため採用しない。
-set +e
-copilot -p "以下の Git diff をコードレビューしてください。
-問題点・改善提案・セキュリティリスクを日本語の箇条書きで指摘してください。
-問題がなければ「問題なし」とだけ回答してください。
-
-PR: ${REPO_FULL_NAME}#${PR_NUMBER}
-タイトル: ${PR_TITLE}
-
-${DIFF_CONTENT}" > /tmp/copilot_stdout.txt 2> /tmp/copilot_stderr.txt
-COPILOT_RC=$?
-set -e
-
-if [ "${COPILOT_RC}" -eq 0 ]; then
-    REVIEW=$(cat /tmp/copilot_stdout.txt)
-else
-    echo "--- Copilot CLI が異常終了しました (rc=${COPILOT_RC}) ---"
-    echo "--- stderr ---"
-    cat /tmp/copilot_stderr.txt || true
-    echo "--- stdout ---"
-    cat /tmp/copilot_stdout.txt || true
-    # PR コメント本文には先頭の数行だけ載せ、詳細はジョブログ側で確認する運用とする
-    ERR_HEAD=$(head -c 500 /tmp/copilot_stderr.txt 2>/dev/null || true)
-    REVIEW="_GitHub Copilot CLI によるレビュー生成に失敗しました（rc=${COPILOT_RC}）。Jenkins ジョブログを確認してください。_
-
-<details><summary>エラー出力（先頭 500 byte）</summary>
-
-\\`\\`\\`
-${ERR_HEAD}
-\\`\\`\\`
-
-</details>"
-fi
-
-echo "--- コメント本文を生成 ---"
-# ヘッダー（変数展開なし）
-cat > /tmp/review_body.txt << 'HEADER_EOF'
-## GitHub Copilot CLI レビュー
-HEADER_EOF
-
-# メタ情報と本文（変数展開あり）
-cat >> /tmp/review_body.txt << META_EOF
-
-**リポジトリ**: \\`${REPO_FULL_NAME}\\`
-**PR**: [#${PR_NUMBER} — ${PR_TITLE}](https://github.com/${REPO_FULL_NAME}/pull/${PR_NUMBER})
-**ブランチ**: \\`${PR_HEAD_REF}\\` / SHA: \\`${PR_HEAD_SHA}\\`${TRUNCATED_NOTE}
-
----
-
-${REVIEW}
-
----
-*このコメントは Jenkins + [@github/copilot](https://www.npmjs.com/package/@github/copilot) によって自動生成されました。*
-META_EOF
-
-echo "--- PR #${PR_NUMBER} にコメントを投稿（GitHub Issues API）---"
-# Node.js で JSON を安全に組み立てて投稿する（改行・引用符などの特殊文字を適切にエスケープ）
-node -e "
-const fs = require('fs');
-const body = fs.readFileSync('/tmp/review_body.txt', 'utf8');
-process.stdout.write(JSON.stringify({ body }));
-" > /tmp/comment_payload.json
-
+# レビュアー追加 API: POST /repos/{owner}/{repo}/pulls/{number}/requested_reviewers
+# 既に同一レビュアーがリクエスト済みの場合 GitHub は現在の状態を 201 で返すため、
+# synchronize 等で複数回呼ばれても安全に冪等となる。
 curl -sS -X POST \
     -H "Authorization: Bearer ${GITHUB_TOKEN}" \
     -H "Accept: application/vnd.github+json" \
     -H "X-GitHub-Api-Version: 2022-11-28" \
     -H "Content-Type: application/json" \
-    -o /tmp/comment_response.json \
+    -o /tmp/reviewer_response.json \
     -w "HTTP_STATUS=%{http_code}\\n" \
-    "https://api.github.com/repos/${REPO_FULL_NAME}/issues/${PR_NUMBER}/comments" \
-    -d @/tmp/comment_payload.json \
-    > /tmp/comment_http.txt 2>&1
+    "https://api.github.com/repos/${REPO_FULL_NAME}/pulls/${PR_NUMBER}/requested_reviewers" \
+    -d "{\\"reviewers\\":[\\"${COPILOT_REVIEWER_LOGIN}\\"]}" \
+    > /tmp/reviewer_http.txt 2>&1
 
-HTTP_STATUS=$(grep -oE 'HTTP_STATUS=[0-9]+' /tmp/comment_http.txt | tail -1 | cut -d= -f2)
-echo "--- GitHub Issues API HTTP ステータス: ${HTTP_STATUS} ---"
+HTTP_STATUS=$(grep -oE 'HTTP_STATUS=[0-9]+' /tmp/reviewer_http.txt | tail -1 | cut -d= -f2)
+echo "--- GitHub API HTTP ステータス: ${HTTP_STATUS} ---"
 
-if [ "${HTTP_STATUS}" != "201" ]; then
-    echo "--- コメント投稿に失敗しました (HTTP ${HTTP_STATUS}) ---"
-    echo "--- レスポンス本文 ---"
-    cat /tmp/comment_response.json || true
-    echo ""
-    echo "--- curl 出力 ---"
-    cat /tmp/comment_http.txt || true
-    exit 22
-fi
-
-COMMENT_ID=$(node -e "
-const r = JSON.parse(require('fs').readFileSync('/tmp/comment_response.json', 'utf8'));
-process.stdout.write(String(r.id || ''));
-")
-
-if [ -n "${COMMENT_ID}" ]; then
-    echo "コメント投稿完了 (ID: ${COMMENT_ID})"
-    echo "URL: https://github.com/${REPO_FULL_NAME}/pull/${PR_NUMBER}#issuecomment-${COMMENT_ID}"
-else
-    echo "コメント投稿に失敗しました"
-    cat /tmp/comment_response.json
-    exit 1
-fi
+# 201 Created または 200 OK を成功扱いとする
+case "${HTTP_STATUS}" in
+    200|201)
+        echo "--- レビュアー指定に成功しました ---"
+        echo "PR URL: https://github.com/${REPO_FULL_NAME}/pull/${PR_NUMBER}"
+        ;;
+    422)
+        # 422 はレビュアー追加対象として無効な場合などに返る
+        # 例: Copilot Code Review がリポジトリ／組織で未有効化のケース
+        echo "--- レビュアー指定に失敗しました (HTTP 422) ---"
+        echo "リポジトリ側で Copilot Code Review が有効化されているか確認してください。"
+        echo "--- レスポンス本文 ---"
+        cat /tmp/reviewer_response.json || true
+        exit 22
+        ;;
+    *)
+        echo "--- レビュアー指定に失敗しました (HTTP ${HTTP_STATUS}) ---"
+        echo "--- レスポンス本文 ---"
+        cat /tmp/reviewer_response.json || true
+        echo ""
+        echo "--- curl 出力 ---"
+        cat /tmp/reviewer_http.txt || true
+        exit 22
+        ;;
+esac
 '''
                 }
             }
@@ -256,10 +178,10 @@ fi
 
     post {
         success {
-            echo "PR #${env.PR_NUMBER} (${env.REPO_FULL_NAME}) のレビューコメントを正常に投稿しました。"
+            echo "PR #${env.PR_NUMBER} (${env.REPO_FULL_NAME}) に Copilot Code Review をリクエストしました。"
         }
         failure {
-            echo "PR #${env.PR_NUMBER} (${env.REPO_FULL_NAME}) のレビュー処理に失敗しました。ログを確認してください。"
+            echo "PR #${env.PR_NUMBER} (${env.REPO_FULL_NAME}) のレビュアー指定に失敗しました。ログを確認してください。"
         }
     }
 }
