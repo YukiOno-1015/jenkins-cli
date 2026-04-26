@@ -93,20 +93,33 @@
 
 ### GitHub Copilot PR レビュー
 
-- `jqit-github-token` (Secret text)
-  - GitHub Copilot CLI 認証用の Personal Access Token
-  - 用途は PR 差分取得とコメント投稿、および Copilot CLI の認証のみのため、`repo` のような広いスコープは付与せず、Fine-grained PAT または GitHub App により最小権限（例: Repository permissions の `Pull requests: Read` / `Contents: Read` / `Copilot Requests`）に絞ることを推奨する
-  - もし PR へのコメント投稿を同じトークンで行う場合は、追加で `Pull requests: Write`（または `Issues: Write`）を付与する。書き込みを別 Credential （例: Classic PAT）に分離する構成も采り得る
-  - ※本ドキュメントでは Read 権限のみを推奨として記載しているものの、セットアップの際はコメント投稿トークンの位置づけを忘れずに検討すること
+認証情報は**役割を分離した 2 トークン構成を推奨**する。同一トークンでの兼用は例外運用とし、漏洩時の影響範囲を限定する。
+
+- `jqit-github-token` (Secret text) — **読み取り + Copilot CLI 認証専用**
+  - GitHub Copilot CLI 認証および PR diff 取得用の Personal Access Token
+  - Fine-grained PAT または GitHub App により最小権限（Repository permissions の `Pull requests: Read` / `Contents: Read` / `Copilot Requests`）に絞る
+  - **書き込み権限は付与しない**。Copilot CLI のサプライチェーン経由で意図せず書き込み API が叩かれた場合の影響を遮断する
   - GitHub Copilot サブスクリプション（Individual / Business / Enterprise）が必要
+- `jqit-github-token-classic` (Secret text) — **コメント書き込み専用**
+  - PR への通常コメント投稿（GitHub Issues API）専用の Personal Access Token
+  - Classic PAT は最小スコープ `public_repo`（プライベート対象を含む場合のみ `repo`）。Fine-grained PAT であれば `Pull requests: Write`（または `Issues: Write`）のみを付与する
+  - 読み取り側のトークンと別 ID で管理し、ローテーションも独立して行えるようにする
+- 例外: 同一トークンへの兼用
+  - 運用都合でやむを得ず兼用する場合は、リスク（書き込み権限を持つトークンが Copilot CLI のプロセスに渡る）を関係者で合意したうえで、対象リポジトリを限定し、ローテーション周期を短くする
 - Webhook トークン
   - Generic Webhook Trigger の `token` パラメータには、推測困難な十分長いランダム文字列を Jenkins Credential 等で管理して使用する
   - リポジトリにサンプルとして掲載しているトークン名（例: `github-copilot-pr-review`）はそのまま運用値として使用しない
-- Webhook ペイロードの取り扱い
-  - 本パイプラインは `$.repository.full_name` をそのまま信頼してリポジトリを動的判定するため、Webhook 経路自体の防御策を併用する
-    - Jenkins ジョブ側で許可するリポジトリの allowlist（例: 許可する `owner/repo` を環境変数や `repositoryConfig` で定義し、合致しない場合は早期 `error` で停止）を設けることを推奨する
-    - Generic Webhook Trigger 側で受信できる場合は GitHub Webhook の署名検証（`X-Hub-Signature-256` を Webhook secret で HMAC 検証）を有効化し、未署名リクエストを拒否する
-  - これらを設けない運用では、トークンの権限次第で意図しないリポジトリへのレビュー/コメント実行に繋がる恐れがあるため、最小権限と allowlist / 署名検証を併用する
+- Webhook ペイロードの取り扱い（共有エンドポイント運用時の必須要件）
+  - 本パイプラインは `$.repository.full_name` をそのまま信頼してリポジトリを動的判定するため、共有エンドポイント運用では以下を**必須**とする
+    - Jenkins ジョブ側で許可するリポジトリの allowlist（許可する `owner/repo` を環境変数や `repositoryConfig` で定義し、合致しない場合は早期 `error` で停止）
+    - GitHub Webhook secret の設定と `X-Hub-Signature-256` の HMAC 検証（Generic Webhook Trigger 自体は署名検証を行わないため、リバースプロキシ層または専用プラグインで検証する／IP 制限・送信元制限と併用する）
+  - これらを設けないまま共有エンドポイントを公開すると、想定外のリポジトリから同一ジョブが起動され、Jenkins 側のトークンで外部 PR にコメントする踏み台になり得る
+- レビューコメントの重複抑止方針
+  - 現状は `opened` / `synchronize` / `reopened` のたびに**毎回新規コメントを追記**する実装で、既存 bot コメントの編集や古いコメントの自動整理は行わない
+  - PR がノイジーになりやすいため、運用ルールとして以下のいずれかを選択することを推奨する
+    - 追記を許容し、最新コメントのみ参照する運用とする
+    - 必要に応じてパイプラインを拡張し、過去 bot コメント（自身のユーザー名で投稿されたもの）を `PATCH /repos/{owner}/{repo}/issues/comments/{comment_id}` で更新、または `DELETE` で整理する方式に切り替える
+  - 拡張する場合は、書き込み専用トークンに `Pull requests: Write` 相当のみが付与されていることを再確認する
 
 ## 運用上の設計原則
 

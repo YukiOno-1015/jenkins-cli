@@ -91,7 +91,12 @@ Jenkins 用の共有ライブラリとパイプライン定義を提供するプ
 - `@github/copilot` npm パッケージを使って差分を AI 解析
 - レビュー結果を PR の通常コメントとして自動投稿
 - Webhook ペイロードの `$.repository.full_name` でリポジトリを動的に判定（複数リポジトリ共有可）
+  - **共有エンドポイント運用は必ず以下の防御策と併用する**こと（詳細は [docs/OPERATIONS_OVERVIEW.md](docs/OPERATIONS_OVERVIEW.md) と [docs/GITHUB_COPILOT_PR_REVIEW.md](docs/GITHUB_COPILOT_PR_REVIEW.md) を参照）
+    - Jenkins ジョブ側で許可する `owner/repo` allowlist を必須化し、合致しないリポジトリからのリクエストは早期 `error` で停止する
+    - GitHub Webhook の secret を設定し、`X-Hub-Signature-256` の HMAC 検証 を必須化する（リバースプロキシまたはプラグインで検証）
+    - Webhook トークンは推測困難なランダム値を Jenkins Credential 等で管理し、サンプル名のまま運用しない
 - opened / synchronize / reopened イベントに反応し、不要なトリガーを除外
+  - 同一 PR への push が連続するとレビューコメントが追記され続けるため、**重複抑止方針**を運用ルールとして定める（現状の挙動は「毎回新規コメントを追記」であり、既存 bot コメントの編集や古いコメントの整理は行っていない。詳細は [docs/GITHUB_COPILOT_PR_REVIEW.md](docs/GITHUB_COPILOT_PR_REVIEW.md) を参照）
 
 ## プロジェクト構成
 
@@ -276,7 +281,8 @@ jenkins-cli install-plugin workflow-aggregator git ssh-agent kubernetes credenti
 | `sonarQubeCredId`         | Secret text                   | Jenkins    | SonarQube認証トークン      | k8sMavenNodePipeline     |
 | `CF_API_TOKEN`            | Secret text                   | Jenkins    | Cloudflare API トークン    | declarative-pipeline     |
 | `CF_ZONE_ID`              | Secret text                   | Jenkins    | Cloudflare ゾーン ID       | declarative-pipeline     |
-| `jqit-github-token`       | Secret text                   | Jenkins    | GitHub PAT（Copilot CLI 認証用、Fine-grained PAT 推奨。Repository permissions: `Pull requests: Read` / `Contents: Read` / `Copilot Requests` 程度の最小権限を付与する。なお、PR へのコメント投稿には追加で `Pull requests: Write`（または `Issues: Write`）が必要で、同一トークンで兼用するか、別 Credential（例: `jqit-github-token-classic`）で書き込みを担当させる構成を検討する） | github-copilot-pr-review |
+| `jqit-github-token`       | Secret text                   | Jenkins    | GitHub PAT（Copilot CLI 認証および PR diff 読み取り用、Fine-grained PAT 推奨。Repository permissions: `Pull requests: Read` / `Contents: Read` / `Copilot Requests` のみの最小権限を付与する。書き込み権限は付与しない）  | github-copilot-pr-review |
+| `jqit-github-token-classic` | Secret text                 | Jenkins    | PR への通常コメント投稿用 GitHub PAT（**推奨構成**）。Classic PAT であれば最小スコープ `public_repo`（プライベート対象を含む場合は `repo`）、Fine-grained であれば `Pull requests: Write`（または `Issues: Write`）のみ付与する。Copilot CLI 認証用トークンとは分離し、書き込み権限の漏洩リスクを限定する。同一トークンでの兼用は例外運用とする | github-copilot-pr-review |
 
 <!-- markdownlint-enable MD060 -->
 
@@ -862,6 +868,9 @@ Failed to create pod
 - ✅ GitHub API で PR diff を取得し `copilot -p` でレビューを生成するフローを記載
 - ✅ GitHub Issues API で PR に通常コメントとして投稿する仕様を記載
 - ✅ Credential ID `jqit-github-token` を使用することを記載
+- ✅ 共有エンドポイント運用時の防御要件（`owner/repo` allowlist の必須化、`X-Hub-Signature-256` の HMAC 検証必須化、Webhook トークンのランダム化）を README / 運用概要 / 詳細ガイドに明記
+- ✅ 認証情報を「読み取り + Copilot CLI 用 (`jqit-github-token`)」と「コメント書き込み用 (`jqit-github-token-classic`)」に**分離する構成を推奨**として明示し、兼用は例外運用として整理
+- ✅ レビューコメントの重複抑止方針（現状は毎回新規追記、運用ルールとして「追記許容」または `PATCH`/`DELETE` での既存 bot コメント整理方式へ拡張、のいずれかを選択）をドキュメントへ追記
 
 ※ パイプライン本体の実装追加は先行する PR で取り込み済みで、本 PR はそのドキュメント整理を目的とする。
 
