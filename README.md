@@ -276,7 +276,7 @@ jenkins-cli install-plugin workflow-aggregator git ssh-agent kubernetes credenti
 | `sonarQubeCredId`         | Secret text                   | Jenkins    | SonarQube認証トークン      | k8sMavenNodePipeline     |
 | `CF_API_TOKEN`            | Secret text                   | Jenkins    | Cloudflare API トークン    | declarative-pipeline     |
 | `CF_ZONE_ID`              | Secret text                   | Jenkins    | Cloudflare ゾーン ID       | declarative-pipeline     |
-| `jqit-github-token`       | Secret text                   | Jenkins    | GitHub PAT（repo スコープ） | github-copilot-pr-review |
+| `jqit-github-token`       | Secret text                   | Jenkins    | GitHub PAT（Copilot CLI 認証用、Fine-grained PAT 推奨。Repository permissions: `Pull requests: Read` / `Contents: Read` / `Copilot Requests` 程度の最小権限を付与する） | github-copilot-pr-review |
 
 <!-- markdownlint-enable MD060 -->
 
@@ -405,7 +405,7 @@ unifiedWebhookPipeline()
 
 ### GitHub Copilot による PR 自動レビュー
 
-GitHub の Pull Request を契機に、`src/github-copilot-pr-review.groovy` で GitHub Copilot Code Review を自動依頼します。
+GitHub の Pull Request を契機に、`src/github-copilot-pr-review.groovy` が GitHub Copilot CLI (`@github/copilot`) を呼び出して差分をレビューし、その結果を PR の通常コメントとして自動投稿します（GitHub 標準の「Copilot Code Review」機能を呼び出すものではありません）。
 
 最小セットアップとしては、Jenkins に対象ジョブを登録し、レビュー対象リポジトリの Webhook を設定してください。
 

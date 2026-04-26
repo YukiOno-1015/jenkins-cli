@@ -94,9 +94,12 @@
 ### GitHub Copilot PR レビュー
 
 - `jqit-github-token` (Secret text)
-  - GitHub Personal Access Token（`repo` スコープ）
+  - GitHub Copilot CLI 認証用の Personal Access Token
+  - 用途は PR 差分取得とコメント投稿、および Copilot CLI の認証のみのため、`repo` のような広いスコープは付与せず、Fine-grained PAT または GitHub App により最小権限（例: Repository permissions の `Pull requests: Read` / `Contents: Read` / `Copilot Requests`）に絞ることを推奨する
   - GitHub Copilot サブスクリプション（Individual / Business / Enterprise）が必要
-- Webhook トークン: `github-copilot-pr-review`（Generic Webhook Trigger の `token` パラメータ）
+- Webhook トークン
+  - Generic Webhook Trigger の `token` パラメータには、推測困難な十分長いランダム文字列を Jenkins Credential 等で管理して使用する
+  - リポジトリにサンプルとして掲載しているトークン名（例: `github-copilot-pr-review`）はそのまま運用値として使用しない
 
 ## 運用上の設計原則
 
