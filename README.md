@@ -106,6 +106,7 @@ jenkins-cli/
 │   ├── AUTHENTICATION_GUIDE.md              # 認証設定ガイド
 │   ├── MAIL_MONITOR_PIPELINE.md            # IMAP メール監視パイプラインガイド
 │   ├── OPERATIONS_OVERVIEW.md              # 運用系パイプラインの概要
+│   ├── GITHUB_COPILOT_PR_REVIEW.md         # GitHub Copilot PR 自動レビュー詳細ガイド
 │   └── templates/local.Jenkins.Agent.launchd.plist # machost用launchdテンプレート
 │
 ├── src/                                     # パイプライン定義
@@ -266,14 +267,18 @@ jenkins-cli install-plugin workflow-aggregator git ssh-agent kubernetes credenti
 
 以下の認証情報を Jenkins に登録する必要があります：
 
-| ID                        | 種別                          | 登録先     | 説明                       | 使用箇所                |
-| ------------------------- | ----------------------------- | ---------- | -------------------------- | ----------------------- |
-| `JQIT_ONO`                | SSH Username with private key | Jenkins    | GitHub SSH 認証鍵          | repositoryConfig で設定 |
-| `dockerhub-jenkins-agent` | docker-registry Secret        | Kubernetes | Docker Hub imagePullSecret | k8sPodYaml              |
-| `sonarQubeCredId`         | Secret text                   | Jenkins    | SonarQube認証トークン      | k8sMavenNodePipeline    |
-| `CF_API_TOKEN`            | Secret text                   | Jenkins    | Cloudflare API トークン    | declarative-pipeline    |
-| `CF_ZONE_ID`              | Secret text                   | Jenkins    | Cloudflare ゾーン ID       | declarative-pipeline    |
-| `jqit-github-token`       | Secret text                   | Jenkins    | GitHub PAT（repo スコープ）| github-copilot-pr-review|
+<!-- markdownlint-disable MD060 -->
+
+| ID                        | 種別                          | 登録先     | 説明                       | 使用箇所                 |
+| ------------------------- | ----------------------------- | ---------- | -------------------------- | ------------------------ |
+| `JQIT_ONO`                | SSH Username with private key | Jenkins    | GitHub SSH 認証鍵          | repositoryConfig で設定  |
+| `dockerhub-jenkins-agent` | docker-registry Secret        | Kubernetes | Docker Hub imagePullSecret | k8sPodYaml               |
+| `sonarQubeCredId`         | Secret text                   | Jenkins    | SonarQube認証トークン      | k8sMavenNodePipeline     |
+| `CF_API_TOKEN`            | Secret text                   | Jenkins    | Cloudflare API トークン    | declarative-pipeline     |
+| `CF_ZONE_ID`              | Secret text                   | Jenkins    | Cloudflare ゾーン ID       | declarative-pipeline     |
+| `jqit-github-token`       | Secret text                   | Jenkins    | GitHub PAT（repo スコープ） | github-copilot-pr-review |
+
+<!-- markdownlint-enable MD060 -->
 
 **注意**: 認証情報IDは `vars/repositoryConfig.groovy` で設定できます。
 
@@ -398,37 +403,13 @@ unifiedWebhookPipeline()
 
 詳細は **[UNIFIED_WEBHOOK_SETUP.md](UNIFIED_WEBHOOK_SETUP.md)** を参照。
 
-### GitHub Copilot CLI による PR 自動レビュー
+### GitHub Copilot による PR 自動レビュー
 
-`src/github-copilot-pr-review.groovy` を Jenkins パイプラインジョブに登録し、レビュー対象リポジトリの Webhook を設定するだけで動作します。
+GitHub の Pull Request を契機に、`src/github-copilot-pr-review.groovy` で GitHub Copilot Code Review を自動依頼します。
 
-**Webhook の設定（GitHub リポジトリ側）**
+最小セットアップとしては、Jenkins に対象ジョブを登録し、レビュー対象リポジトリの Webhook を設定してください。
 
-```
-Payload URL : https://<jenkins-host>/generic-webhook-trigger/invoke?token=github-copilot-pr-review
-Content type: application/json
-Events      : Pull requests
-```
-
-複数リポジトリから同一 URL を向けても、`$.repository.full_name` でリポジトリを動的に判定するため追加設定は不要です。
-
-**動作フロー**
-
-1. PR が opened / synchronize / reopened されると Webhook を受信
-2. `@github/copilot` CLI を `npm install -g @github/copilot` でセットアップ
-3. GitHub API から PR の diff を取得
-4. `copilot -p "..."` で AI レビューを生成（`COPILOT_GITHUB_TOKEN` で認証）
-5. GitHub Issues API で PR に通常コメントとして投稿
-
-**必要な Jenkins Credential**
-
-<!-- markdownlint-disable MD060 -->
-
-| ID                  | 種別        | 説明                                                              |
-|---------------------|-------------|-------------------------------------------------------------------|
-| `jqit-github-token` | Secret text | GitHub PAT（repo スコープ、Copilot サブスクリプション必須） |
-
-<!-- markdownlint-enable MD060 -->
+Webhook の具体的な設定値、イベント条件、動作フロー、必要な Credential、運用上の注意点などの詳細は **[docs/GITHUB_COPILOT_PR_REVIEW.md](docs/GITHUB_COPILOT_PR_REVIEW.md)** を参照してください。
 
 ### 従来型パイプライン
 
