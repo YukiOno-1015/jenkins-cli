@@ -26,7 +26,7 @@ def RULE_DEFS = [
         hosts: [
             'zabbix-cli.sk4869.info',
             'sonarqube-cli.sk4869.info',
-            'jenkins-cli.sk4869.info', 
+            'jenkins-cli.sk4869.info',
             'pv-cli.sk4869.info',
         ],
     ],
@@ -121,6 +121,24 @@ spec:
             }
         }
 
+        stage('Fetch GitHub Webhook IPs') {
+            steps {
+                script {
+                    def raw = sh(
+                        script: "curl -fsS 'https://api.github.com/meta'",
+                        returnStdout: true
+                    ).trim()
+                    def meta = readJSON(text: raw)
+                    def hookIps = (meta.hooks ?: []) as List
+                    if (!hookIps) {
+                        error('GitHub Meta API から hooks IP レンジを取得できませんでした。')
+                    }
+                    env.GITHUB_WEBHOOK_IPS = hookIps.join(' ')
+                    echo "GitHub Webhook IP 取得完了: ${hookIps.size()} レンジ"
+                }
+            }
+        }
+
         stage('Check IP Change') {
             steps {
                 script {
@@ -179,7 +197,9 @@ spec:
                                 continue
                             }
 
-                            def allowedIps = (ruleDef.allowedIps ?: [env.CURRENT_IP, env.PREV_IP]).findAll { it?.trim() }
+                            def githubIps = (env.GITHUB_WEBHOOK_IPS ?: '').trim().tokenize()
+                            def baseIps = ruleDef.allowedIps ?: [env.CURRENT_IP, env.PREV_IP]
+                            def allowedIps = (baseIps + githubIps).findAll { it?.trim() }.unique()
                             if (!allowedIps) {
                                 echo "警告: '${ruleDef.desc}' に許可 IP が設定されていません。スキップします。"
                                 continue
