@@ -129,7 +129,8 @@ spec:
                         returnStdout: true
                     ).trim()
                     def meta = readJSON(text: raw)
-                    def hookIps = (meta.hooks ?: []) as List
+                    // collect で JSONArray → ArrayList に変換し、サンドボックス外の join を回避
+                    def hookIps = meta.hooks.collect { it.toString() }
                     if (!hookIps) {
                         error('GitHub Meta API から hooks IP レンジを取得できませんでした。')
                     }
