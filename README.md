@@ -85,6 +85,14 @@ Jenkins 用の共有ライブラリとパイプライン定義を提供するプ
 - `PVC_CLAIM_NAME` を指定すると Pod 再作成後も state を保持可能
 - `TEST_NOTIFICATIONS_ONLY=true` で Slack 通知疎通のみ確認可能
 
+### 8. 🤖 GitHub Copilot CLI による PR 自動レビュー
+
+- **github-copilot-pr-review**: GitHub `pull_request` Webhook を受け取り PR を自動レビュー
+- `@github/copilot` npm パッケージを使って差分を AI 解析
+- レビュー結果を PR の通常コメントとして自動投稿
+- Webhook ペイロードの `$.repository.full_name` でリポジトリを動的に判定（複数リポジトリ共有可）
+- opened / synchronize / reopened イベントに反応し、不要なトリガーを除外
+
 ## プロジェクト構成
 
 ```
@@ -106,6 +114,7 @@ jenkins-cli/
 │   ├── portalAppBackEndPipeline.groovy     # Portal App Backend ビルドパイプライン（簡略化済み）
 │   ├── declarative-pipeline.groovy         # Cloudflare allowlist 更新パイプライン
 │   ├── monitor-email-alerts.groovy         # IMAP メール監視 → Slack 通知パイプライン
+│   ├── github-copilot-pr-review.groovy     # GitHub Copilot CLI による PR 自動レビューパイプライン
 │   ├── update-machosts.groovy              # Debian/Ubuntu 系 machost 更新パイプライン
 │   └── update-proxmox-hosts.groovy         # Proxmox ホスト監視/更新パイプライン
 │
@@ -147,6 +156,7 @@ flowchart TD
   S2[Skill: proxmox-host-maintenance] --> F2[src/update-proxmox-hosts.groovy]
   S3[Skill: cloudflare-allowlist-pipeline] --> F3[src/declarative-pipeline.groovy]
   S4[Skill: macos-jenkins-agent-launchd] --> F4[docs/templates/local.Jenkins.Agent.launchd.plist]
+  S5[Skill: github-copilot-pr-review] --> F5[src/github-copilot-pr-review.groovy]
 
   B --> C1[vars/repositoryConfig.groovy]
   B --> C2[vars/k8sMavenNodePipeline.groovy]
@@ -158,10 +168,12 @@ flowchart TD
   F2 --> N1[Slack or Discord credentials]
   F3 --> N2[Cloudflare credentials]
   F4 --> M1
+  F5 --> N3[jqit-github-token]
 ```
 
 - build 系の入口は `README.md`、`vars/repositoryConfig.groovy`、`vars/k8sMavenNodePipeline.groovy`、`src/unifiedWebhookPipeline.groovy`
 - 運用系の入口は `src/update-machosts.groovy`、`src/update-proxmox-hosts.groovy`、`src/declarative-pipeline.groovy`、`src/monitor-email-alerts.groovy`
+- PR 自動レビューの入口は `src/github-copilot-pr-review.groovy`
 - macOS 上の Jenkins agent 常駐設定は `docs/templates/local.Jenkins.Agent.launchd.plist` を参照
   - 現在のテンプレートは Jenkins agent 用 Java 21 前提
 
@@ -261,6 +273,7 @@ jenkins-cli install-plugin workflow-aggregator git ssh-agent kubernetes credenti
 | `sonarQubeCredId`         | Secret text                   | Jenkins    | SonarQube認証トークン      | k8sMavenNodePipeline    |
 | `CF_API_TOKEN`            | Secret text                   | Jenkins    | Cloudflare API トークン    | declarative-pipeline    |
 | `CF_ZONE_ID`              | Secret text                   | Jenkins    | Cloudflare ゾーン ID       | declarative-pipeline    |
+| `jqit-github-token`       | Secret text                   | Jenkins    | GitHub PAT（repo スコープ）| github-copilot-pr-review|
 
 **注意**: 認証情報IDは `vars/repositoryConfig.groovy` で設定できます。
 
@@ -384,6 +397,34 @@ unifiedWebhookPipeline()
 - ✅ 成果物のアーカイブ
 
 詳細は **[UNIFIED_WEBHOOK_SETUP.md](UNIFIED_WEBHOOK_SETUP.md)** を参照。
+
+### GitHub Copilot CLI による PR 自動レビュー
+
+`src/github-copilot-pr-review.groovy` を Jenkins パイプラインジョブに登録し、レビュー対象リポジトリの Webhook を設定するだけで動作します。
+
+**Webhook の設定（GitHub リポジトリ側）**
+
+```
+Payload URL : https://<jenkins-host>/generic-webhook-trigger/invoke?token=github-copilot-pr-review
+Content type: application/json
+Events      : Pull requests
+```
+
+複数リポジトリから同一 URL を向けても、`$.repository.full_name` でリポジトリを動的に判定するため追加設定は不要です。
+
+**動作フロー**
+
+1. PR が opened / synchronize / reopened されると Webhook を受信
+2. `@github/copilot` CLI を `npm install -g @github/copilot` でセットアップ
+3. GitHub API から PR の diff を取得
+4. `copilot -p "..."` で AI レビューを生成（`COPILOT_GITHUB_TOKEN` で認証）
+5. GitHub Issues API で PR に通常コメントとして投稿
+
+**必要な Jenkins Credential**
+
+| ID | 種別 | 説明 |
+|----|------|------|
+| `jqit-github-token` | Secret text | GitHub PAT（repo スコープ、Copilot サブスクリプション必須） |
 
 ### 従来型パイプライン
 
@@ -824,6 +865,18 @@ Failed to create pod
 バグ報告や機能要望は、Issue を作成してください。
 
 ## 変更履歴
+
+### 2026-04-26 - GitHub Copilot CLI による PR 自動レビュー機能の追加
+
+#### 🤖 PR 自動レビューパイプライン
+
+- ✅ `src/github-copilot-pr-review.groovy` を新規追加
+- ✅ `@github/copilot` npm パッケージを `honoka4869/jenkins-maven-node` イメージ上でセットアップ
+- ✅ Generic Webhook Trigger で `pull_request` イベント（opened / synchronize / reopened）を受信
+- ✅ `$.repository.full_name` でリポジトリを動的取得（複数リポジトリで同一エンドポイント共有可）
+- ✅ GitHub API で PR diff を取得し `copilot -p` で AI レビューを生成
+- ✅ GitHub Issues API で PR に通常コメントとして自動投稿
+- ✅ Credential ID `jqit-github-token` を使用
 
 ### 2026-01-17 - リポジトリ設定の一元管理とパラメータ削減
 

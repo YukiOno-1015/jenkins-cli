@@ -26,6 +26,11 @@
   - 外部 (インターネット) 向けの帯域を定期計測
   - 結果を 1 つの JSON にまとめて Jenkins コンソール出力 + アーティファクト保存
   - VIP / Tunnel 等の内部経路は Pod から到達できない可能性が高いため対象外
+- `src/github-copilot-pr-review.groovy`
+  - GitHub `pull_request` Webhook を受け取り PR を GitHub Copilot CLI で自動レビュー
+  - `@github/copilot` npm パッケージを使って差分を AI 解析
+  - レビュー結果を PR の通常コメントとして自動投稿
+  - `$.repository.full_name` でリポジトリを動的判定（複数リポジトリ共有可）
 
 ## 実行基盤
 
@@ -44,6 +49,10 @@
   - Jenkins agent: `kubernetes`
   - 実行方式: Kubernetes Pod ベースのコンテナ実行（既定イメージ `nicolaka/netshoot:latest`）
   - `speedtest-cli` を優先利用し、未導入時は `EXTERNAL_FALLBACK_URL` を `curl` でダウンロードして帯域換算
+- `src/github-copilot-pr-review.groovy`
+  - Jenkins agent: `kubernetes`
+  - 実行方式: Kubernetes Pod ベースのコンテナ実行（イメージ `honoka4869/jenkins-maven-node:latest`）
+  - トリガー: Generic Webhook Trigger による GitHub `pull_request` イベント
 - スケジュール: 各 pipeline の `cron` 設定に従う
 
 ## 通知と認証情報
@@ -82,6 +91,13 @@
   - コンテナAgent運用時は永続ボリューム（PVC など）のマウント先を指定する
   - 例: `/data/qiita-auto-engagement/processed_item_ids.txt`
 
+### GitHub Copilot PR レビュー
+
+- `jqit-github-token` (Secret text)
+  - GitHub Personal Access Token（`repo` スコープ）
+  - GitHub Copilot サブスクリプション（Individual / Business / Enterprise）が必要
+- Webhook トークン: `github-copilot-pr-review`（Generic Webhook Trigger の `token` パラメータ）
+
 ## 運用上の設計原則
 
 - 監視と更新を分離し、デフォルトでは破壊的変更を行わない
@@ -95,3 +111,4 @@
 - `proxmox-host-maintenance` → `src/update-proxmox-hosts.groovy`
 - `cloudflare-allowlist-pipeline` → `src/declarative-pipeline.groovy`
 - `macos-jenkins-agent-launchd` → `docs/templates/local.Jenkins.Agent.launchd.plist`
+- `github-copilot-pr-review` → `src/github-copilot-pr-review.groovy`
