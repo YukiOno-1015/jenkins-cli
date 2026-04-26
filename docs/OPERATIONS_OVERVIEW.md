@@ -83,6 +83,10 @@
 
 ### GitHub Copilot PR レビュー
 
+- `github-copilot-pr-review-secret` (Secret text)
+  - Webhook の HMAC-SHA256 署名検証用シークレット
+  - GitHub リポジトリの Webhook 設定 "Secret" フィールドと同じ値を登録する
+  - GenericTrigger の `secretToken` に渡し、`X-Hub-Signature-256` で偽造ペイロードを拒否する
 - `jqit-github-token` (Secret text)
   - GitHub Fine-grained Personal Access Token（Copilot CLI 認証用）
   - 必要権限: Copilot Requests / Contents: Read / Pull requests: Read

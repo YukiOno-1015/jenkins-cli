@@ -74,6 +74,13 @@ spec:
             ],
             causeString: 'GitHub PR #$PR_NUMBER ($WEBHOOK_ACTION) by $SENDER_LOGIN — $REPO_FULL_NAME',
             token: 'github-copilot-pr-review',
+            // GitHub が送信する X-Hub-Signature-256 ヘッダーで HMAC-SHA256 署名を検証する。
+            // env.PR_REVIEW_WEBHOOK_SECRET は下の environment ブロックで credentials() によって
+            // バインドされる。初回ビルド完了後にジョブ設定が更新され、以降の Webhook は
+            // 署名検証が有効になる（初回のみ空文字列で無効化状態）。
+            secretToken: env.PR_REVIEW_WEBHOOK_SECRET,
+            hmacAlgorithm: 'sha256',
+            hmacHeader: 'X-Hub-Signature-256',
             // opened / synchronize / reopened 以外のアクションは無視する
             regexpFilterText: '$WEBHOOK_ACTION',
             regexpFilterExpression: '^(opened|synchronize|reopened)$'
@@ -85,6 +92,12 @@ spec:
         timeout(time: 20, unit: 'MINUTES')
         timestamps()
         skipDefaultCheckout(true)
+    }
+
+    environment {
+        // Webhook の X-Hub-Signature-256 HMAC 検証に使う秘密鍵。
+        // GenericTrigger の secretToken に渡し、ビルド完了後にジョブ設定へ反映される。
+        PR_REVIEW_WEBHOOK_SECRET = credentials('github-copilot-pr-review-secret')
     }
 
     stages {
@@ -266,6 +279,13 @@ if [ "${PROMPT_SIZE}" -ge "${MAX_ARG_STRLEN}" ]; then
         echo "再切り詰め後も収まらないためフォールバックコメントを投稿します。"
     else
         head -c "${NEW_DIFF_MAX}" /tmp/pr_diff.patch > /tmp/pr_diff_r2.patch
+        # 初回切り詰めと同様に iconv で UTF-8 不正バイトを除去する
+        if command -v iconv >/dev/null 2>&1; then
+            if iconv -f UTF-8 -t UTF-8 -c /tmp/pr_diff_r2.patch > /tmp/pr_diff_r3.patch 2>/dev/null; then
+                mv /tmp/pr_diff_r3.patch /tmp/pr_diff_r2.patch
+            fi
+            rm -f /tmp/pr_diff_r3.patch 2>/dev/null || true
+        fi
         mv /tmp/pr_diff_r2.patch /tmp/pr_diff.patch
         DIFF_CONTENT=$(cat /tmp/pr_diff.patch)
         RETRY_SIZE=$(wc -c < /tmp/pr_diff.patch)

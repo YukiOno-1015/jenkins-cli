@@ -267,15 +267,16 @@ jenkins-cli install-plugin workflow-aggregator git ssh-agent kubernetes credenti
 
 以下の認証情報を Jenkins に登録する必要があります：
 
-| ID                          | 種別                          | 登録先     | 説明                       | 使用箇所                 |
-| --------------------------- | ----------------------------- | ---------- | -------------------------- | ------------------------ |
-| `JQIT_ONO`                  | SSH Username with private key | Jenkins    | GitHub SSH 認証鍵          | repositoryConfig で設定  |
-| `dockerhub-jenkins-agent`   | docker-registry Secret        | Kubernetes | Docker Hub imagePullSecret | k8sPodYaml               |
-| `sonarQubeCredId`           | Secret text                   | Jenkins    | SonarQube認証トークン      | k8sMavenNodePipeline     |
-| `CF_API_TOKEN`              | Secret text                   | Jenkins    | Cloudflare API トークン    | declarative-pipeline     |
-| `CF_ZONE_ID`                | Secret text                   | Jenkins    | Cloudflare ゾーン ID       | declarative-pipeline     |
-| `jqit-github-token`         | Secret text                   | Jenkins    | Copilot CLI 認証用 PAT     | github-copilot-pr-review |
-| `jqit-github-token-classic` | Secret text                   | Jenkins    | PR コメント投稿用 PAT      | github-copilot-pr-review |
+| ID                                | 種別                          | 登録先     | 説明                       | 使用箇所                 |
+| --------------------------------- | ----------------------------- | ---------- | -------------------------- | ------------------------ |
+| `JQIT_ONO`                        | SSH Username with private key | Jenkins    | GitHub SSH 認証鍵          | repositoryConfig で設定  |
+| `dockerhub-jenkins-agent`         | docker-registry Secret        | Kubernetes | Docker Hub imagePullSecret | k8sPodYaml               |
+| `sonarQubeCredId`                 | Secret text                   | Jenkins    | SonarQube認証トークン      | k8sMavenNodePipeline     |
+| `CF_API_TOKEN`                    | Secret text                   | Jenkins    | Cloudflare API トークン    | declarative-pipeline     |
+| `CF_ZONE_ID`                      | Secret text                   | Jenkins    | Cloudflare ゾーン ID       | declarative-pipeline     |
+| `github-copilot-pr-review-secret` | Secret text                   | Jenkins    | Webhook 署名検証用         | github-copilot-pr-review |
+| `jqit-github-token`               | Secret text                   | Jenkins    | Copilot CLI 認証用 PAT     | github-copilot-pr-review |
+| `jqit-github-token-classic`       | Secret text                   | Jenkins    | PR コメント投稿用 PAT      | github-copilot-pr-review |
 
 **注意**: 認証情報IDは `vars/repositoryConfig.groovy` で設定できます。
 
