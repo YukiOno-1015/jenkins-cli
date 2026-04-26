@@ -151,27 +151,48 @@ curl -fsSL \
 DIFF_SIZE=$(wc -c < /tmp/pr_diff.patch)
 echo "差分サイズ: ${DIFF_SIZE} bytes"
 
-# copilot -p の引数長上限を考慮して先頭 10,000 バイトに切り詰める
-if [ "${DIFF_SIZE}" -gt 10000 ]; then
-    head -c 10000 /tmp/pr_diff.patch > /tmp/pr_diff_trim.patch
+# copilot -p は引数として渡すため argv 長 (Linux の ARG_MAX、概ね 2MB) を超えないよう
+# 上限を設ける。Copilot 側のコンテキスト長と argv 余裕を踏まえ、レビュー対象を
+# 200,000 バイト (約 200KB) までに抑える。これを超える PR は先頭のみレビューし、
+# 後続はコメント末尾に明示する。
+DIFF_MAX_BYTES=200000
+if [ "${DIFF_SIZE}" -gt "${DIFF_MAX_BYTES}" ]; then
+    head -c "${DIFF_MAX_BYTES}" /tmp/pr_diff.patch > /tmp/pr_diff_trim.patch
     mv /tmp/pr_diff_trim.patch /tmp/pr_diff.patch
-    TRUNCATED_NOTE=" ※差分が大きいため先頭 10,000 バイトのみレビュー対象"
-    echo "差分を切り詰めました。"
+    TRUNCATED_NOTE=" ※差分が大きいため先頭 ${DIFF_MAX_BYTES} バイトのみレビュー対象 (元サイズ: ${DIFF_SIZE} bytes)"
+    echo "差分を ${DIFF_MAX_BYTES} バイトに切り詰めました。"
 fi
 
 DIFF_CONTENT=$(cat /tmp/pr_diff.patch)
+
+# Copilot がレビュー時刻を学習データ (2025 年前後) のまま扱うと、
+# 「日付が未来になっている」「ライブラリのバージョンが新しすぎる」等の誤指摘を
+# 出すケースがあるため、現在日時 (UTC / JST) をプロンプトに明示注入する。
+NOW_UTC=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
+NOW_JST=$(TZ=Asia/Tokyo date +"%Y-%m-%d %H:%M:%S JST")
+echo "現在日時 (UTC): ${NOW_UTC} / (JST): ${NOW_JST}"
 
 echo "--- Copilot CLI でレビューを生成（-p フラグで非インタラクティブ実行）---"
 # stdout / stderr をそれぞれファイルへ分離し、失敗時は stderr をジョブログへ出力する。
 # 以前の `$(cmd 2>&1) || fallback` 方式は失敗時のエラー詳細を握り潰してしまうため採用しない。
 set +e
-copilot -p "以下の Git diff をコードレビューしてください。
-問題点・改善提案・セキュリティリスクを日本語の箇条書きで指摘してください。
-問題がなければ「問題なし」とだけ回答してください。
+copilot -p "あなたはコードレビュアーです。以下の Git diff をレビューしてください。
 
-PR: ${REPO_FULL_NAME}#${PR_NUMBER}
-タイトル: ${PR_TITLE}
+# 前提条件
+- **現在日時 (実行時刻)**: ${NOW_UTC} / ${NOW_JST}
+- 上記が現在の現実時刻です。あなたの学習データ上の「現在」と異なっていても、上記日時を真として扱ってください。
+- 「日付が未来である」「リリース予定のバージョンを使っている」等、現在日時に関する指摘は不要です (本当に未来の日付がハードコードされている等、明らかに不自然な場合のみ指摘してください)。
 
+# 観点
+- 問題点・改善提案・セキュリティリスクを日本語の箇条書きで指摘してください。
+- 問題がなければ「問題なし」とだけ回答してください。
+
+# 対象 PR
+- リポジトリ: ${REPO_FULL_NAME}
+- PR 番号: #${PR_NUMBER}
+- タイトル: ${PR_TITLE}
+
+# Git diff
 ${DIFF_CONTENT}" > /tmp/copilot_stdout.txt 2> /tmp/copilot_stderr.txt
 COPILOT_RC=$?
 set -e

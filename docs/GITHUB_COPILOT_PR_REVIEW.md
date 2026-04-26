@@ -6,7 +6,7 @@
 
 - トリガー: GitHub `pull_request` Webhook（`opened` / `synchronize` / `reopened` のみ）
 - 実行環境: Kubernetes Pod（`honoka4869/jenkins-maven-node:latest`、npm 内蔵）
-- レビュー対象: GitHub API から取得した PR の diff（先頭 10,000 バイトまで）
+- レビュー対象: GitHub API から取得した PR の diff（先頭 200,000 バイトまで）
 - 出力先: 対象 PR の Issue コメント
 
 `$.repository.full_name` でリポジトリを動的に判定するため、複数リポジトリで同一 Webhook エンドポイントを共有できます。
@@ -43,6 +43,7 @@
 
 ## 注意事項
 
-- `copilot -p` の引数長と Copilot 側のコンテキスト長を考慮し、差分は先頭 10,000 バイトに切り詰めています。差分が大きい PR ではコメント末尾にその旨を明記します。
+- `copilot -p` の引数長 (Linux の `ARG_MAX` 概ね 2MB) と Copilot 側のコンテキスト長を考慮し、差分は先頭 200,000 バイト (約 200KB) に切り詰めています。差分が大きい PR ではコメント末尾にその旨と元サイズを明記します。
+- Copilot が学習データ上の時刻 (2025 年付近) を「現在」とみなしてしまうケースに備え、ジョブ実行時の現在日時 (UTC / JST) をプロンプトに明示注入し、日付に関する誤指摘を抑制しています。
 - レビュー生成に失敗した場合は手動レビューを促すフォールバックコメントを投稿します。
 - 投稿コメントは `node -e` で JSON を組み立ててから `curl -d @file` で送信しており、改行や引用符を含む本文でも安全に投稿できます。
