@@ -160,9 +160,9 @@ HEADER_EOF
 # メタ情報と本文（変数展開あり）
 cat >> /tmp/review_body.txt << META_EOF
 
-**リポジトリ**: \`${REPO_FULL_NAME}\`
+**リポジトリ**: \\`${REPO_FULL_NAME}\\`
 **PR**: [#${PR_NUMBER} — ${PR_TITLE}](https://github.com/${REPO_FULL_NAME}/pull/${PR_NUMBER})
-**ブランチ**: \`${PR_HEAD_REF}\` / SHA: \`${PR_HEAD_SHA}\`${TRUNCATED_NOTE}
+**ブランチ**: \\`${PR_HEAD_REF}\\` / SHA: \\`${PR_HEAD_SHA}\\`${TRUNCATED_NOTE}
 
 ---
 
