@@ -15,7 +15,8 @@
 
 | ID | 種別 | 用途 |
 | --- | --- | --- |
-| `jqit-github-token-classic` | Secret text | GitHub Personal Access Token (Classic)（スコープ `repo` 以上、Copilot サブスクリプションが付与されたユーザー）。Fine-grained PAT では Copilot CLI 認証および Issue コメント投稿の権限組み合わせで 403 が発生したため Classic PAT を採用する。 |
+| `jqit-github-token` | Secret text | GitHub Fine-grained Personal Access Token。**Copilot CLI 認証専用** (`COPILOT_GITHUB_TOKEN` / `GH_TOKEN` に展開)。Copilot サブスクリプションが付与されたユーザーのトークンを設定する。Repository permissions: `Pull requests: Read`, `Contents: Read`, および `Copilot Requests` を有効化する。 |
+| `jqit-github-token-classic` | Secret text | GitHub Personal Access Token (Classic, scope=`repo`)。**PR への issue comment 投稿および PR diff 取得用** (`GITHUB_TOKEN`)。Fine-grained PAT では Issues / PR 書き込み権限の組み合わせで 403 が発生したため、書き込み API は Classic PAT に集約している。 |
 
 `copilot` CLI は `COPILOT_GITHUB_TOKEN` を優先して認証に利用します。本パイプラインでは `GITHUB_TOKEN` の値をそのまま `COPILOT_GITHUB_TOKEN` にエクスポートしています。
 

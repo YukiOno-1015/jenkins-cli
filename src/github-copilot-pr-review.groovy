@@ -9,14 +9,19 @@
  *   4. GitHub API で PR の diff を取得し、copilot -p でレビューを生成する
  *   5. GitHub Issues API で PR に通常コメントとして投稿する
  *
- * 必要な Jenkins Credentials（Kind: Secret text）:
+ * 必要な Jenkins Credentials（いずれも Kind: Secret text）:
+ *   jqit-github-token         : GitHub Fine-grained Personal Access Token
+ *                               用途: GitHub Copilot CLI (@github/copilot) の認証のみに使用する。
+ *                               必要権限: "Copilot Requests"、および PR diff 取得のための
+ *                                 Repository permissions の Contents: Read / Pull requests: Read。
+ *                               ※ Copilot サブスクリプション（Individual / Business / Enterprise）
+ *                                 に紐づくアカウントの PAT であることが前提。
  *   jqit-github-token-classic : GitHub Personal Access Token (Classic)
- *                               必要スコープ: repo（PR への issue comment 投稿に必要）
- *                               ※ GitHub Copilot CLI で利用するには Copilot サブスクリプション
- *                                 （Individual / Business / Enterprise）に紐づくアカウントの PAT が必要
- *                               ※ Fine-grained PAT では Copilot CLI 認証および本パイプラインの
- *                                 Issues/PR 書き込み権限の組み合わせで 403 になるケースがあるため
- *                                 Classic PAT を採用する
+ *                               用途: 生成したレビュー本文を PR に issue comment として投稿する
+ *                                     ための GitHub REST API 認証に使用する。
+ *                               必要スコープ: repo。
+ *                               ※ Fine-grained PAT では Issues / PR 書き込み権限の組み合わせで
+ *                                 403 となるケースがあるため、コメント投稿側は Classic PAT に集約している。
  *
  * 必要な Jenkins プラグイン:
  *   - Generic Webhook Trigger Plugin
@@ -117,18 +122,26 @@ copilot --version || true
 
         stage('Review & Post Comment') {
             steps {
-                withCredentials([string(credentialsId: 'jqit-github-token-classic', variable: 'GITHUB_TOKEN')]) {
+                // Copilot CLI 認証用（Fine-grained PAT）と PR コメント投稿用（Classic PAT）を
+                // 別 Credential として同時にバインドし、それぞれの役割で使い分ける。
+                withCredentials([
+                    string(credentialsId: 'jqit-github-token',         variable: 'COPILOT_TOKEN'),
+                    string(credentialsId: 'jqit-github-token-classic', variable: 'GITHUB_TOKEN'),
+                ]) {
                     sh '''#!/bin/sh
 set -e
-# copilot CLI v1.0.36 は GH_TOKEN > GITHUB_TOKEN の順に参照する。
-# withCredentials で GITHUB_TOKEN が既に設定されているため、優先される GH_TOKEN にも同じ値を流して明示する。
-export GH_TOKEN="${GITHUB_TOKEN}"
+# Copilot CLI は COPILOT_GITHUB_TOKEN > GH_TOKEN > GITHUB_TOKEN の順で認証トークンを参照する。
+# withCredentials で GITHUB_TOKEN には Classic PAT（コメント投稿用）が入るため、
+# Copilot CLI 側は COPILOT_GITHUB_TOKEN / GH_TOKEN へ Fine-grained PAT を明示的に渡し、
+# コメント投稿や PR diff 取得用の API 呼び出しとトークンを分離する。
+export COPILOT_GITHUB_TOKEN="${COPILOT_TOKEN}"
+export GH_TOKEN="${COPILOT_TOKEN}"
 TRUNCATED_NOTE=""
 
 echo "--- copilot CLI 認証状態の確認（失敗してもパイプラインは継続）---"
 copilot --version || true
 
-echo "--- PR #${PR_NUMBER} の差分を取得（GitHub API）---"
+echo "--- PR #${PR_NUMBER} の差分を取得（GitHub API、Classic PAT で認証）---"
 curl -fsSL \
     -H "Authorization: Bearer ${GITHUB_TOKEN}" \
     -H "Accept: application/vnd.github.v3.diff" \
