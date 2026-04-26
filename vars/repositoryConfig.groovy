@@ -29,7 +29,12 @@ def call(String repoNameOrUrl) {
     ],
     '54.148.157.219': [
       deployUser: 'ec2-user',
-      deploySshCredentialsId: 'jqit-deploy-github-ssh',
+      deploySshCredentialsId: 'jqit-deploy-aws-ssh',
+      deployPort: 22
+    ],
+    '54.65.96.84': [
+      deployUser: 'ec2-user',
+      deploySshCredentialsId: 'jqit-deploy-aws-tokyo-ssh',
       deployPort: 22
     ]
   ]
