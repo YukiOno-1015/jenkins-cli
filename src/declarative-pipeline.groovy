@@ -136,6 +136,10 @@ spec:
                     }
                     env.GITHUB_WEBHOOK_IPS = hookIps.join(' ')
                     echo "GitHub Webhook IP 取得完了: ${hookIps.size()} レンジ"
+                    // 取得したレンジを 1 件ずつログに残し、後追い調査を容易にする
+                    hookIps.eachWithIndex { ip, idx ->
+                        echo "  [${idx + 1}/${hookIps.size()}] ${ip}"
+                    }
                 }
             }
         }
