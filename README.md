@@ -276,7 +276,7 @@ jenkins-cli install-plugin workflow-aggregator git ssh-agent kubernetes credenti
 | `sonarQubeCredId`         | Secret text                   | Jenkins    | SonarQube認証トークン      | k8sMavenNodePipeline     |
 | `CF_API_TOKEN`            | Secret text                   | Jenkins    | Cloudflare API トークン    | declarative-pipeline     |
 | `CF_ZONE_ID`              | Secret text                   | Jenkins    | Cloudflare ゾーン ID       | declarative-pipeline     |
-| `jqit-github-token`       | Secret text                   | Jenkins    | GitHub PAT（Copilot CLI 認証用、Fine-grained PAT 推奨。Repository permissions: `Pull requests: Read` / `Contents: Read` / `Copilot Requests` 程度の最小権限を付与する） | github-copilot-pr-review |
+| `jqit-github-token`       | Secret text                   | Jenkins    | GitHub PAT（Copilot CLI 認証用、Fine-grained PAT 推奨。Repository permissions: `Pull requests: Read` / `Contents: Read` / `Copilot Requests` 程度の最小権限を付与する。なお、PR へのコメント投稿には追加で `Pull requests: Write`（または `Issues: Write`）が必要で、同一トークンで兼用するか、別 Credential（例: `jqit-github-token-classic`）で書き込みを担当させる構成を検討する） | github-copilot-pr-review |
 
 <!-- markdownlint-enable MD060 -->
 
@@ -851,17 +851,19 @@ Failed to create pod
 
 ## 変更履歴
 
-### 2026-04-26 - GitHub Copilot CLI による PR 自動レビュー機能の追加
+### 2026-04-26 - GitHub Copilot CLI による PR 自動レビュー機能のドキュメント追記
 
-#### 🤖 PR 自動レビューパイプライン
+#### 🤖 PR 自動レビューパイプラインの説明を追加
 
-- ✅ `src/github-copilot-pr-review.groovy` を新規追加
-- ✅ `@github/copilot` npm パッケージを `honoka4869/jenkins-maven-node` イメージ上でセットアップ
-- ✅ Generic Webhook Trigger で `pull_request` イベント（opened / synchronize / reopened）を受信
-- ✅ `$.repository.full_name` でリポジトリを動的取得（複数リポジトリで同一エンドポイント共有可）
-- ✅ GitHub API で PR diff を取得し `copilot -p` で AI レビューを生成
-- ✅ GitHub Issues API で PR に通常コメントとして自動投稿
-- ✅ Credential ID `jqit-github-token` を使用
+- ✅ `src/github-copilot-pr-review.groovy` の説明を README / 運用概要へ追記
+- ✅ `@github/copilot` npm パッケージを `honoka4869/jenkins-maven-node` イメージ上でセットアップする手順を明記
+- ✅ Generic Webhook Trigger で `pull_request` イベント（opened / synchronize / reopened）を受信する設定を記載
+- ✅ `$.repository.full_name` でリポジトリを動的取得し、複数リポジトリで同一エンドポイントを共有する運用を明示
+- ✅ GitHub API で PR diff を取得し `copilot -p` でレビューを生成するフローを記載
+- ✅ GitHub Issues API で PR に通常コメントとして投稿する仕様を記載
+- ✅ Credential ID `jqit-github-token` を使用することを記載
+
+※ パイプライン本体の実装追加は先行する PR で取り込み済みで、本 PR はそのドキュメント整理を目的とする。
 
 ### 2026-01-17 - リポジトリ設定の一元管理とパラメータ削減
 

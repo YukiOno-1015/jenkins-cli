@@ -96,10 +96,17 @@
 - `jqit-github-token` (Secret text)
   - GitHub Copilot CLI 認証用の Personal Access Token
   - 用途は PR 差分取得とコメント投稿、および Copilot CLI の認証のみのため、`repo` のような広いスコープは付与せず、Fine-grained PAT または GitHub App により最小権限（例: Repository permissions の `Pull requests: Read` / `Contents: Read` / `Copilot Requests`）に絞ることを推奨する
+  - もし PR へのコメント投稿を同じトークンで行う場合は、追加で `Pull requests: Write`（または `Issues: Write`）を付与する。書き込みを別 Credential （例: Classic PAT）に分離する構成も采り得る
+  - ※本ドキュメントでは Read 権限のみを推奨として記載しているものの、セットアップの際はコメント投稿トークンの位置づけを忘れずに検討すること
   - GitHub Copilot サブスクリプション（Individual / Business / Enterprise）が必要
 - Webhook トークン
   - Generic Webhook Trigger の `token` パラメータには、推測困難な十分長いランダム文字列を Jenkins Credential 等で管理して使用する
   - リポジトリにサンプルとして掲載しているトークン名（例: `github-copilot-pr-review`）はそのまま運用値として使用しない
+- Webhook ペイロードの取り扱い
+  - 本パイプラインは `$.repository.full_name` をそのまま信頼してリポジトリを動的判定するため、Webhook 経路自体の防御策を併用する
+    - Jenkins ジョブ側で許可するリポジトリの allowlist（例: 許可する `owner/repo` を環境変数や `repositoryConfig` で定義し、合致しない場合は早期 `error` で停止）を設けることを推奨する
+    - Generic Webhook Trigger 側で受信できる場合は GitHub Webhook の署名検証（`X-Hub-Signature-256` を Webhook secret で HMAC 検証）を有効化し、未署名リクエストを拒否する
+  - これらを設けない運用では、トークンの権限次第で意図しないリポジトリへのレビュー/コメント実行に繋がる恐れがあるため、最小権限と allowlist / 署名検証を併用する
 
 ## 運用上の設計原則
 
