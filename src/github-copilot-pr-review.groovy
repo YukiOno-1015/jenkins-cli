@@ -10,9 +10,11 @@
  *   5. GitHub Issues API で PR に通常コメントとして投稿する
  *
  * 必要な Jenkins Credentials（Kind: Secret text）:
- *   github-token : GitHub Personal Access Token
- *                  必要スコープ: repo（コメント書き込み）
- *                  ※ GitHub Copilot サブスクリプション（Individual / Business / Enterprise）が必要
+ *   jqit-github-token : GitHub Personal Access Token
+ *                       必要スコープ: repo（コメント書き込み）
+ *                       ※ GitHub Copilot CLI で利用するには Copilot サブスクリプション
+ *                         （Individual / Business / Enterprise）に紐づくアカウントの PAT が必要
+ *                       ※ fine-grained PAT を使う場合は "Copilot Requests" 権限を有効化すること
  *
  * 必要な Jenkins プラグイン:
  *   - Generic Webhook Trigger Plugin
@@ -116,9 +118,13 @@ copilot --version || true
                 withCredentials([string(credentialsId: 'jqit-github-token', variable: 'GITHUB_TOKEN')]) {
                     sh '''#!/bin/sh
 set -e
-# copilot CLI の認証: COPILOT_GITHUB_TOKEN > GH_TOKEN > GITHUB_TOKEN の優先順で参照される
-export COPILOT_GITHUB_TOKEN="${GITHUB_TOKEN}"
+# copilot CLI v1.0.36 は GH_TOKEN > GITHUB_TOKEN の順に参照する。
+# withCredentials で GITHUB_TOKEN が既に設定されているため、優先される GH_TOKEN にも同じ値を流して明示する。
+export GH_TOKEN="${GITHUB_TOKEN}"
 TRUNCATED_NOTE=""
+
+echo "--- copilot CLI 認証状態の確認（失敗してもパイプラインは継続）---"
+copilot --version || true
 
 echo "--- PR #${PR_NUMBER} の差分を取得（GitHub API）---"
 curl -fsSL \
@@ -141,15 +147,40 @@ fi
 DIFF_CONTENT=$(cat /tmp/pr_diff.patch)
 
 echo "--- Copilot CLI でレビューを生成（-p フラグで非インタラクティブ実行）---"
-REVIEW=$(copilot -p "以下の Git diff をコードレビューしてください。
+# stdout / stderr をそれぞれファイルへ分離し、失敗時は stderr をジョブログへ出力する。
+# 以前の `$(cmd 2>&1) || fallback` 方式は失敗時のエラー詳細を握り潰してしまうため採用しない。
+set +e
+copilot -p "以下の Git diff をコードレビューしてください。
 問題点・改善提案・セキュリティリスクを日本語の箇条書きで指摘してください。
 問題がなければ「問題なし」とだけ回答してください。
 
 PR: ${REPO_FULL_NAME}#${PR_NUMBER}
 タイトル: ${PR_TITLE}
 
-${DIFF_CONTENT}" 2>&1) \
-    || REVIEW="_GitHub Copilot CLI によるレビュー生成に失敗しました。手動レビューをお願いします。_"
+${DIFF_CONTENT}" > /tmp/copilot_stdout.txt 2> /tmp/copilot_stderr.txt
+COPILOT_RC=$?
+set -e
+
+if [ "${COPILOT_RC}" -eq 0 ]; then
+    REVIEW=$(cat /tmp/copilot_stdout.txt)
+else
+    echo "--- Copilot CLI が異常終了しました (rc=${COPILOT_RC}) ---"
+    echo "--- stderr ---"
+    cat /tmp/copilot_stderr.txt || true
+    echo "--- stdout ---"
+    cat /tmp/copilot_stdout.txt || true
+    # PR コメント本文には先頭の数行だけ載せ、詳細はジョブログ側で確認する運用とする
+    ERR_HEAD=$(head -c 500 /tmp/copilot_stderr.txt 2>/dev/null || true)
+    REVIEW="_GitHub Copilot CLI によるレビュー生成に失敗しました（rc=${COPILOT_RC}）。Jenkins ジョブログを確認してください。_
+
+<details><summary>エラー出力（先頭 500 byte）</summary>
+
+\\`\\`\\`
+${ERR_HEAD}
+\\`\\`\\`
+
+</details>"
+fi
 
 echo "--- コメント本文を生成 ---"
 # ヘッダー（変数展開なし）
