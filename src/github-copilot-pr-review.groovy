@@ -211,12 +211,29 @@ const body = fs.readFileSync('/tmp/review_body.txt', 'utf8');
 process.stdout.write(JSON.stringify({ body }));
 " > /tmp/comment_payload.json
 
-curl -fsSL -X POST \
+curl -sS -X POST \
     -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+    -H "Accept: application/vnd.github+json" \
+    -H "X-GitHub-Api-Version: 2022-11-28" \
     -H "Content-Type: application/json" \
+    -o /tmp/comment_response.json \
+    -w "HTTP_STATUS=%{http_code}\\n" \
     "https://api.github.com/repos/${REPO_FULL_NAME}/issues/${PR_NUMBER}/comments" \
     -d @/tmp/comment_payload.json \
-    > /tmp/comment_response.json
+    > /tmp/comment_http.txt 2>&1
+
+HTTP_STATUS=$(grep -oE 'HTTP_STATUS=[0-9]+' /tmp/comment_http.txt | tail -1 | cut -d= -f2)
+echo "--- GitHub Issues API HTTP ステータス: ${HTTP_STATUS} ---"
+
+if [ "${HTTP_STATUS}" != "201" ]; then
+    echo "--- コメント投稿に失敗しました (HTTP ${HTTP_STATUS}) ---"
+    echo "--- レスポンス本文 ---"
+    cat /tmp/comment_response.json || true
+    echo ""
+    echo "--- curl 出力 ---"
+    cat /tmp/comment_http.txt || true
+    exit 22
+fi
 
 COMMENT_ID=$(node -e "
 const r = JSON.parse(require('fs').readFileSync('/tmp/comment_response.json', 'utf8'));
