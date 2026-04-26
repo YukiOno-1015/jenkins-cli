@@ -17,10 +17,10 @@
 
 | ID | 種別 | 用途 | 推奨スコープ／権限 |
 | --- | --- | --- | --- |
-| `jqit-github-token` | Secret text | Copilot CLI 認証および PR diff 読み取り | Fine-grained PAT: `Pull requests: Read` / `Contents: Read` / `Copilot Requests`。**書き込み権限は付与しない**。Copilot サブスクリプション必須 |
-| `jqit-github-token-classic` | Secret text | PR への通常コメント投稿（GitHub Issues API） | Classic PAT: `public_repo`（プライベート対象を含む場合のみ `repo`） / Fine-grained: `Pull requests: Write` または `Issues: Write` のみ |
+| `jqit-github-token` | Secret text | Copilot CLI 認証および PR diff 読み取り（`COPILOT_GITHUB_TOKEN` / `GH_TOKEN` に展開） | Fine-grained PAT: `Pull requests: Read` / `Contents: Read` / `Copilot Requests`。**書き込み権限は付与しない**。Copilot サブスクリプション必須 |
+| `jqit-github-token-classic` | Secret text | PR への通常コメント投稿（GitHub Issues API、`GITHUB_TOKEN` に展開） | Classic PAT: `public_repo`（プライベート対象を含む場合のみ `repo`） / Fine-grained: `Pull requests: Write` または `Issues: Write` のみ |
 
-`copilot` CLI は `COPILOT_GITHUB_TOKEN` を優先して認証に利用するため、読み取り用トークンを `COPILOT_GITHUB_TOKEN` および `GH_TOKEN` に、書き込み用トークンを `GITHUB_TOKEN` にエクスポートして使い分ける構成を推奨する。
+`copilot` CLI は `COPILOT_GITHUB_TOKEN` を優先して認証に利用するため、読み取り用トークンを `COPILOT_GITHUB_TOKEN` および `GH_TOKEN` に、書き込み用トークンを `GITHUB_TOKEN` にエクスポートして使い分ける構成を推奨する。なお Fine-grained PAT に Issues / PR 書き込み権限を組み合わせた場合に 403 が発生する事象が確認されているため、書き込み API には Classic PAT（`jqit-github-token-classic`）を採用している。
 
 例外運用として 1 トークンへ集約する場合は、書き込み権限が Copilot CLI プロセスに渡る点をリスクとして合意したうえで、対象リポジトリを限定し短いローテーション周期で運用する。
 

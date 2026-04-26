@@ -9,10 +9,19 @@
  *   4. GitHub API で PR の diff を取得し、copilot -p でレビューを生成する
  *   5. GitHub Issues API で PR に通常コメントとして投稿する
  *
- * 必要な Jenkins Credentials（Kind: Secret text）:
- *   github-token : GitHub Personal Access Token
- *                  必要スコープ: repo（コメント書き込み）
- *                  ※ GitHub Copilot サブスクリプション（Individual / Business / Enterprise）が必要
+ * 必要な Jenkins Credentials（いずれも Kind: Secret text）:
+ *   jqit-github-token         : GitHub Fine-grained Personal Access Token
+ *                               用途: GitHub Copilot CLI (@github/copilot) の認証のみに使用する。
+ *                               必要権限: "Copilot Requests"、および PR diff 取得のための
+ *                                 Repository permissions の Contents: Read / Pull requests: Read。
+ *                               ※ Copilot サブスクリプション（Individual / Business / Enterprise）
+ *                                 に紐づくアカウントの PAT であることが前提。
+ *   jqit-github-token-classic : GitHub Personal Access Token (Classic)
+ *                               用途: 生成したレビュー本文を PR に issue comment として投稿する
+ *                                     ための GitHub REST API 認証に使用する。
+ *                               必要スコープ: repo。
+ *                               ※ Fine-grained PAT では Issues / PR 書き込み権限の組み合わせで
+ *                                 403 となるケースがあるため、コメント投稿側は Classic PAT に集約している。
  *
  * 必要な Jenkins プラグイン:
  *   - Generic Webhook Trigger Plugin
@@ -113,14 +122,26 @@ copilot --version || true
 
         stage('Review & Post Comment') {
             steps {
-                withCredentials([string(credentialsId: 'jqit-github-token', variable: 'GITHUB_TOKEN')]) {
+                // Copilot CLI 認証用（Fine-grained PAT）と PR コメント投稿用（Classic PAT）を
+                // 別 Credential として同時にバインドし、それぞれの役割で使い分ける。
+                withCredentials([
+                    string(credentialsId: 'jqit-github-token',         variable: 'COPILOT_TOKEN'),
+                    string(credentialsId: 'jqit-github-token-classic', variable: 'GITHUB_TOKEN'),
+                ]) {
                     sh '''#!/bin/sh
 set -e
-# copilot CLI の認証: COPILOT_GITHUB_TOKEN > GH_TOKEN > GITHUB_TOKEN の優先順で参照される
-export COPILOT_GITHUB_TOKEN="${GITHUB_TOKEN}"
+# Copilot CLI は COPILOT_GITHUB_TOKEN > GH_TOKEN > GITHUB_TOKEN の順で認証トークンを参照する。
+# withCredentials で GITHUB_TOKEN には Classic PAT（コメント投稿用）が入るため、
+# Copilot CLI 側は COPILOT_GITHUB_TOKEN / GH_TOKEN へ Fine-grained PAT を明示的に渡し、
+# コメント投稿や PR diff 取得用の API 呼び出しとトークンを分離する。
+export COPILOT_GITHUB_TOKEN="${COPILOT_TOKEN}"
+export GH_TOKEN="${COPILOT_TOKEN}"
 TRUNCATED_NOTE=""
 
-echo "--- PR #${PR_NUMBER} の差分を取得（GitHub API）---"
+echo "--- copilot CLI 認証状態の確認（失敗してもパイプラインは継続）---"
+copilot --version || true
+
+echo "--- PR #${PR_NUMBER} の差分を取得（GitHub API、Classic PAT で認証）---"
 curl -fsSL \
     -H "Authorization: Bearer ${GITHUB_TOKEN}" \
     -H "Accept: application/vnd.github.v3.diff" \
@@ -141,15 +162,40 @@ fi
 DIFF_CONTENT=$(cat /tmp/pr_diff.patch)
 
 echo "--- Copilot CLI でレビューを生成（-p フラグで非インタラクティブ実行）---"
-REVIEW=$(copilot -p "以下の Git diff をコードレビューしてください。
+# stdout / stderr をそれぞれファイルへ分離し、失敗時は stderr をジョブログへ出力する。
+# 以前の `$(cmd 2>&1) || fallback` 方式は失敗時のエラー詳細を握り潰してしまうため採用しない。
+set +e
+copilot -p "以下の Git diff をコードレビューしてください。
 問題点・改善提案・セキュリティリスクを日本語の箇条書きで指摘してください。
 問題がなければ「問題なし」とだけ回答してください。
 
 PR: ${REPO_FULL_NAME}#${PR_NUMBER}
 タイトル: ${PR_TITLE}
 
-${DIFF_CONTENT}" 2>&1) \
-    || REVIEW="_GitHub Copilot CLI によるレビュー生成に失敗しました。手動レビューをお願いします。_"
+${DIFF_CONTENT}" > /tmp/copilot_stdout.txt 2> /tmp/copilot_stderr.txt
+COPILOT_RC=$?
+set -e
+
+if [ "${COPILOT_RC}" -eq 0 ]; then
+    REVIEW=$(cat /tmp/copilot_stdout.txt)
+else
+    echo "--- Copilot CLI が異常終了しました (rc=${COPILOT_RC}) ---"
+    echo "--- stderr ---"
+    cat /tmp/copilot_stderr.txt || true
+    echo "--- stdout ---"
+    cat /tmp/copilot_stdout.txt || true
+    # PR コメント本文には先頭の数行だけ載せ、詳細はジョブログ側で確認する運用とする
+    ERR_HEAD=$(head -c 500 /tmp/copilot_stderr.txt 2>/dev/null || true)
+    REVIEW="_GitHub Copilot CLI によるレビュー生成に失敗しました（rc=${COPILOT_RC}）。Jenkins ジョブログを確認してください。_
+
+<details><summary>エラー出力（先頭 500 byte）</summary>
+
+\\`\\`\\`
+${ERR_HEAD}
+\\`\\`\\`
+
+</details>"
+fi
 
 echo "--- コメント本文を生成 ---"
 # ヘッダー（変数展開なし）
@@ -180,12 +226,29 @@ const body = fs.readFileSync('/tmp/review_body.txt', 'utf8');
 process.stdout.write(JSON.stringify({ body }));
 " > /tmp/comment_payload.json
 
-curl -fsSL -X POST \
+curl -sS -X POST \
     -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+    -H "Accept: application/vnd.github+json" \
+    -H "X-GitHub-Api-Version: 2022-11-28" \
     -H "Content-Type: application/json" \
+    -o /tmp/comment_response.json \
+    -w "HTTP_STATUS=%{http_code}\\n" \
     "https://api.github.com/repos/${REPO_FULL_NAME}/issues/${PR_NUMBER}/comments" \
     -d @/tmp/comment_payload.json \
-    > /tmp/comment_response.json
+    > /tmp/comment_http.txt 2>&1
+
+HTTP_STATUS=$(grep -oE 'HTTP_STATUS=[0-9]+' /tmp/comment_http.txt | tail -1 | cut -d= -f2)
+echo "--- GitHub Issues API HTTP ステータス: ${HTTP_STATUS} ---"
+
+if [ "${HTTP_STATUS}" != "201" ]; then
+    echo "--- コメント投稿に失敗しました (HTTP ${HTTP_STATUS}) ---"
+    echo "--- レスポンス本文 ---"
+    cat /tmp/comment_response.json || true
+    echo ""
+    echo "--- curl 出力 ---"
+    cat /tmp/comment_http.txt || true
+    exit 22
+fi
 
 COMMENT_ID=$(node -e "
 const r = JSON.parse(require('fs').readFileSync('/tmp/comment_response.json', 'utf8'));
