@@ -428,7 +428,7 @@ Events      : Pull requests
 **動作フロー**
 
 1. PR が opened / synchronize / reopened されると Webhook を受信（署名検証済み）
-2. `honoka4869/jenkins-maven-node` コンテナ上で `npm install -g @github/copilot@<version>` を実行
+2. `nexus-docker.sk4869.info/honoka4869/jenkins-maven-node` コンテナ上で `npm install -g @github/copilot@<version>` を実行
    - **バージョンを固定すること**。固定しない場合、upstream の破壊的更新や npm 障害がそのままレビュー停止に直結する
    - **推奨**: Docker イメージに事前組み込みにすることで毎回のインストールコストと不安定さを解消できる
 3. GitHub API から PR の diff を取得（`jqit-github-token-classic` で認証）
@@ -535,7 +535,7 @@ def podYaml = k8sPodYaml(
 
 // 従来通り明示的に指定も可能
 def podYaml = k8sPodYaml(
-  image: 'honoka4869/jenkins-maven-node:latest',
+  image: 'nexus-docker.sk4869.info/honoka4869/jenkins-maven-node:latest',
   cpuRequest: '500m',
   memRequest: '2Gi',
   cpuLimit: '2',
@@ -883,7 +883,7 @@ Failed to create pod
 ### 2026-04-26 - GitHub Copilot CLI による PR 自動レビュー機能の追加
 
 - ✅ `src/github-copilot-pr-review.groovy` を新規追加
-- ✅ `@github/copilot` npm パッケージを既存の `honoka4869/jenkins-maven-node` イメージ上でセットアップ
+- ✅ `@github/copilot` npm パッケージを既存の `nexus-docker.sk4869.info/honoka4869/jenkins-maven-node` イメージ上でセットアップ
 - ✅ Generic Webhook Trigger で `pull_request` イベント（opened / synchronize / reopened）を受信
 - ✅ `$.repository.full_name` でリポジトリを動的取得（複数リポジトリで同一エンドポイント共有可）
 - ✅ GitHub API で PR diff を取得し `copilot -p` で AI レビューを生成

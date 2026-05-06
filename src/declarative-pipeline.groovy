@@ -43,7 +43,7 @@ kind: Pod
 spec:
   containers:
   - name: main
-    image: honoka4869/jenkins-maven-node:latest
+    image: nexus-docker.sk4869.info/honoka4869/jenkins-maven-node:latest
     command:
     - cat
     tty: true

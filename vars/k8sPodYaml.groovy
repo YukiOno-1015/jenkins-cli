@@ -20,7 +20,7 @@ def call(Map args = [:]) {
     }
     
     // 引数 > repositoryConfig > デフォルト値 の優先順位
-    def image = args.get('image', config?.k8s?.image ?: 'honoka4869/jenkins-maven-node:latest')
+    def image = args.get('image', config?.k8s?.image ?: 'nexus-docker.sk4869.info/honoka4869/jenkins-maven-node:latest')
     def imagePullSecret = args.get('imagePullSecret', 'docker-hub')
     def cpuReq = args.get('cpuRequest', config?.k8s?.cpuRequest ?: '500m')
     def memReq = args.get('memRequest', config?.k8s?.memRequest ?: '2Gi')
