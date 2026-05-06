@@ -53,6 +53,8 @@ pipeline {
 apiVersion: v1
 kind: Pod
 spec:
+  imagePullSecrets:
+    - name: nexus
   containers:
     - name: main
       image: nexus-docker.sk4869.info/honoka4869/jenkins-maven-node:latest

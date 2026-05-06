@@ -123,6 +123,8 @@ metadata:
     jenkins: jenkins-network-speedtest
 spec:
   restartPolicy: Never
+  imagePullSecrets:
+    - name: nexus
   containers:
     - name: netshoot
       image: ${image}
