@@ -64,7 +64,7 @@ def call(String repoNameOrUrl) {
       
       // リソース要件（K8s）
       k8s: [
-        image: 'nexus-docker.sk4869.info/honoka4869/jenkins-maven-node:latest',
+        image: 'nexus-docker-pull.sk4869.info/honoka4869/jenkins-maven-node:latest',
         cpuRequest: '500m',
         memRequest: '2Gi',
         cpuLimit: '2',
@@ -95,7 +95,7 @@ def call(String repoNameOrUrl) {
       
       // リソース要件（K8s）
       k8s: [
-        image: 'nexus-docker.sk4869.info/honoka4869/jenkins-maven-node:latest',
+        image: 'nexus-docker-pull.sk4869.info/honoka4869/jenkins-maven-node:latest',
         cpuRequest: '500m',
         memRequest: '2Gi',
         cpuLimit: '2',
@@ -130,7 +130,7 @@ def call(String repoNameOrUrl) {
       
       // リソース要件（K8s）
       k8s: [
-        image: 'nexus-docker.sk4869.info/honoka4869/jenkins-maven-node:latest',
+        image: 'nexus-docker-pull.sk4869.info/honoka4869/jenkins-maven-node:latest',
         cpuRequest: '500m',
         memRequest: '1Gi',
         cpuLimit: '2',
@@ -148,7 +148,7 @@ def call(String repoNameOrUrl) {
     //   sonarEnabled: true,
     //   skipTestsByDefault: false,
     //   k8s: [
-    //     image: 'nexus-docker.sk4869.info/honoka4869/jenkins-maven-node:latest',
+    //     image: 'nexus-docker-pull.sk4869.info/honoka4869/jenkins-maven-node:latest',
     //     cpuRequest: '1',
     //     memRequest: '4Gi',
     //     cpuLimit: '4',
@@ -173,7 +173,7 @@ def call(String repoNameOrUrl) {
       sonarEnabled: true,
       skipTestsByDefault: false,
       k8s: [
-        image: 'nexus-docker.sk4869.info/honoka4869/jenkins-maven-node:latest',
+        image: 'nexus-docker-pull.sk4869.info/honoka4869/jenkins-maven-node:latest',
         cpuRequest: '500m',
         memRequest: '2Gi',
         cpuLimit: '2',

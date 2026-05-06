@@ -38,7 +38,7 @@ try {
     library 'jqit-lib@main'
 }
 
-@Field String DEFAULT_AGENT_IMAGE = 'nexus-docker.sk4869.info/honoka4869/jenkins-maven-node:latest'
+@Field String DEFAULT_AGENT_IMAGE = 'nexus-docker-pull.sk4869.info/honoka4869/jenkins-maven-node:latest'
 @Field String DEFAULT_STATE_MOUNT_PATH = '/eclipse-monitor-state'
 @Field String DEFAULT_STATE_FILE_NAME = 'pleiades-mac-java.json'
 @Field String DEFAULT_PLEIADES_INDEX_URL = 'https://willbrains.jp/'

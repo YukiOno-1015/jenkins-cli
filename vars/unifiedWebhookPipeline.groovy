@@ -19,7 +19,7 @@ def call(Map config = [:]) {
   // デフォルト設定
   def defaults = [
     namespace: 'jenkins',
-    k8sImage: 'nexus-docker.sk4869.info/honoka4869/jenkins-maven-node:latest',
+    k8sImage: 'nexus-docker-pull.sk4869.info/honoka4869/jenkins-maven-node:latest',
     k8sImagePullSecret: 'nexus',
     k8sCpuRequest: '500m',
     k8sMemRequest: '2Gi',

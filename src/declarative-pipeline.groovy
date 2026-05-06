@@ -45,7 +45,7 @@ spec:
   - name: nexus
   containers:
   - name: main
-    image: nexus-docker.sk4869.info/honoka4869/jenkins-maven-node:latest
+    image: nexus-docker-pull.sk4869.info/honoka4869/jenkins-maven-node:latest
     command:
     - cat
     tty: true
