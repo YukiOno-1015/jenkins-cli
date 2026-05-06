@@ -270,7 +270,7 @@ jenkins-cli install-plugin workflow-aggregator git ssh-agent kubernetes credenti
 | ID                                | 種別                          | 登録先     | 説明                       | 使用箇所                 |
 | --------------------------------- | ----------------------------- | ---------- | -------------------------- | ------------------------ |
 | `JQIT_ONO`                        | SSH Username with private key | Jenkins    | GitHub SSH 認証鍵          | repositoryConfig で設定  |
-| `dockerhub-jenkins-agent`         | docker-registry Secret        | Kubernetes | Docker Hub imagePullSecret | k8sPodYaml               |
+| `nexus`                           | docker-registry Secret        | Kubernetes | Nexus imagePullSecret      | k8sPodYaml               |
 | `sonarQubeCredId`                 | Secret text                   | Jenkins    | SonarQube認証トークン      | k8sMavenNodePipeline     |
 | `CF_API_TOKEN`                    | Secret text                   | Jenkins    | Cloudflare API トークン    | declarative-pipeline     |
 | `CF_ZONE_ID`                      | Secret text                   | Jenkins    | Cloudflare ゾーン ID       | declarative-pipeline     |
@@ -304,24 +304,23 @@ Jenkins 管理画面で以下の設定を行います：
 kubectl create namespace jenkins
 ```
 
-#### 2.2 Docker Hub imagePullSecret の作成
+#### 2.2 Nexus Docker imagePullSecret の作成
 
-プライベートイメージを使用する場合のみ必要です：
+社内 Nexus (`nexus-docker.sk4869.info`) からイメージを取得するための K8s docker-registry シークレットを作成します：
 
 ```bash
-# Docker Hub の認証情報を使ってKubernetesシークレットを作成
-kubectl create secret docker-registry dockerhub-jenkins-agent \
-  --docker-server=https://index.docker.io/v1/ \
-  --docker-username=<your-dockerhub-username> \
-  --docker-password=<your-dockerhub-password> \
-  --docker-email=<your-email> \
+# Nexus の認証情報を使って Kubernetes シークレットを作成
+kubectl create secret docker-registry nexus \
+  --docker-server=https://nexus-docker.sk4869.info \
+  --docker-username=<nexus-username> \
+  --docker-password=<nexus-password> \
   --namespace=jenkins
 
 # 作成確認
-kubectl get secret dockerhub-jenkins-agent -n jenkins
+kubectl get secret nexus -n jenkins
 ```
 
-**注意**: パブリックイメージのみ使用する場合、この手順はスキップできます。
+**注意**: 全イメージは Nexus 経由で取得するため、本シークレットは必須です（パブリックイメージも同様）。
 
 #### 2.3 Jenkins Kubernetes Cloud 設定
 
@@ -349,22 +348,21 @@ Manage Jenkins → Manage Credentials → Add Credentials
 - Private Key: （GitHub用の秘密鍵を入力）
 ```
 
-**Docker Hub imagePullSecret:**
+**Nexus Docker imagePullSecret:**
 
 ```bash
-# 1. Docker Hub の認証情報を使ってKubernetesシークレットを作成
-kubectl create secret docker-registry dockerhub-jenkins-agent \
-  --docker-server=https://index.docker.io/v1/ \
-  --docker-username=<your-dockerhub-username> \
-  --docker-password=<your-dockerhub-password> \
-  --docker-email=<your-email> \
+# 1. Nexus の認証情報を使って Kubernetes シークレットを作成
+kubectl create secret docker-registry nexus \
+  --docker-server=https://nexus-docker.sk4869.info \
+  --docker-username=<nexus-username> \
+  --docker-password=<nexus-password> \
   --namespace=jenkins
 
 # 2. シークレットが作成されたことを確認
-kubectl get secret dockerhub-jenkins-agent -n jenkins
+kubectl get secret nexus -n jenkins
 
-# 注意: プライベートイメージを使用しない場合、この設定は不要です
-# パブリックイメージのみ使用する場合は、k8sPodYamlのimagePullSecretパラメータを空文字列に設定できます
+# 全イメージを Nexus 経由で取得するため必須
+# imagePullSecret 名は k8sPodYaml / 各 Pod yaml の既定値 'nexus' と揃えること
 ```
 
 **Cloudflare 認証情報:**

@@ -22,7 +22,7 @@ def call(Map cfg = [:]) {
     // ---- 設定の優先順位: 引数 > repositoryConfig > デフォルト値 ----
     def k8sNamespace = cfg.get('namespace', 'jenkins')
     // NOTE: これは "Kubernetes Secret 名" (spec.imagePullSecrets[].name)
-    def imagePullSecret = cfg.get('imagePullSecret', 'docker-hub')
+    def imagePullSecret = cfg.get('imagePullSecret', 'nexus')
 
     def gitBranch = cfg.get('gitBranch', 'release1.0.0')
     def configuredGitCredId = repoConfig.credentialsId?.toString()?.trim()

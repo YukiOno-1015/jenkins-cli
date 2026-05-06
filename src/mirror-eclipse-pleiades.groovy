@@ -372,6 +372,8 @@ apiVersion: v1
 kind: Pod
 spec:
   restartPolicy: Never
+  imagePullSecrets:
+    - name: nexus
   containers:
     - name: main
       image: "${DEFAULT_AGENT_IMAGE}"

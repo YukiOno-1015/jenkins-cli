@@ -23,7 +23,7 @@ pipeline {
     kubernetes {
       yaml k8sPodYaml(
         image: 'nexus-docker.sk4869.info/honoka4869/jenkins-maven-node:latest',
-        imagePullSecret: 'docker-hub',
+        imagePullSecret: 'nexus',
         cpuRequest: '250m',
         memRequest: '512Mi',
         cpuLimit: '1',

@@ -20,7 +20,7 @@ def call(Map config = [:]) {
   def defaults = [
     namespace: 'jenkins',
     k8sImage: 'nexus-docker.sk4869.info/honoka4869/jenkins-maven-node:latest',
-    k8sImagePullSecret: 'dockerhub-jenkins-agent',
+    k8sImagePullSecret: 'nexus',
     k8sCpuRequest: '500m',
     k8sMemRequest: '2Gi',
     k8sCpuLimit: '2',
