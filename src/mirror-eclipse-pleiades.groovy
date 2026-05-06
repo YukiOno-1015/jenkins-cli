@@ -83,8 +83,8 @@ pipeline {
         )
         string(
             name: 'SLACK_CHANNEL',
-            defaultValue: '',
-            description: 'Slack 通知先チャンネル名 / ID（空欄なら Slack 通知をスキップ）'
+            defaultValue: 'C0B1HJFPTV5',
+            description: 'Slack 通知先チャンネル ID（既定: Eclipse 更新通知チャンネル。空欄にすれば通知をスキップ）'
         )
         string(
             name: 'SLACK_TOKEN_CREDENTIAL_ID',
