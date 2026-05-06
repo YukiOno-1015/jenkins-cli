@@ -251,6 +251,11 @@ pipeline {
                     }
 
                     // 4. state 更新
+                    //
+                    // writeFile step は jnlp コンテナ経由で動くため、main コンテナにのみ
+                    // マウントされている state PVC (/eclipse-monitor-state) には直接書き込めない
+                    // (AccessDeniedException となる)。
+                    // 一旦 workspace (両コンテナで共有) に書いて、main の sh で PVC へコピーする。
                     def newState = [
                         year     : detected.year,
                         version  : detected.version,
@@ -261,9 +266,14 @@ pipeline {
                         files    : detected.files.collect { [variant: it.variant, filename: it.filename, md5: it.md5] }
                     ]
                     writeFile(
-                        file: cfg.stateFilePath,
+                        file: '.pleiades-state.json',
                         text: JsonOutput.prettyPrint(JsonOutput.toJson(newState)) + '\n'
                     )
+                    sh """#!/bin/bash
+                        set -euo pipefail
+                        cp .pleiades-state.json '${shellQuote(cfg.stateFilePath)}'
+                        rm -f .pleiades-state.json
+                    """
                     echo "state を更新しました: ${cfg.stateFilePath}"
 
                     // 5. Slack 通知（SLACK_CHANNEL 未指定ならスキップ）
