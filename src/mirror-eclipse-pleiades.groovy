@@ -214,7 +214,10 @@ pipeline {
                     List<Map> downloaded = []
 
                     detected.files.each { Map f ->
-                        String localPath = "/tmp/${f.filename}"
+                        // ワークスペース直下に DL する。
+                        // /tmp 配下だと fileExists step が absolute path を解決できず
+                        // nexusRawUpload 内の存在チェックで false 扱いとなる事象がある。
+                        String localPath = f.filename
                         echo "→ DL: ${f.downloadUrl}"
                         sh """#!/bin/bash
                             set -euo pipefail
@@ -306,7 +309,7 @@ pipeline {
 
                     // 6. ローカル一時ファイル削除（ephemeral-storage を逼迫させないため）
                     sh '''
-                        rm -f /tmp/pleiades-*.dmg 2>/dev/null || true
+                        rm -f pleiades-*.dmg 2>/dev/null || true
                     '''
 
                     echo '✓ ミラーリング完了'
