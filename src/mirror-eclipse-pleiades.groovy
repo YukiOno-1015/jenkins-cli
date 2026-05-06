@@ -148,7 +148,7 @@ pipeline {
                         echo '[WARN] PVC_CLAIM_NAME 未指定です。Pod 再作成で state が失われるため、毎回 DL が走る可能性があります。'
                     }
 
-                    sh '''
+                    sh '''#!/bin/bash
                         set -euo pipefail
                         echo '--- 必須コマンド確認 ---'
                         command -v python3 || command -v python
@@ -165,7 +165,7 @@ pipeline {
                         ])
                     )
 
-                    sh '''
+                    sh '''#!/bin/bash
                         set -euo pipefail
                         PY=$(command -v python3 || command -v python)
                         "$PY" .pleiades-detect.py \
@@ -221,7 +221,7 @@ pipeline {
                     detected.files.each { Map f ->
                         String localPath = "/tmp/${f.filename}"
                         echo "→ DL: ${f.downloadUrl}"
-                        sh """
+                        sh """#!/bin/bash
                             set -euo pipefail
                             curl -fL --retry 3 --retry-delay 10 --max-time 3600 \\
                               -o '${shellQuote(localPath)}' \\
