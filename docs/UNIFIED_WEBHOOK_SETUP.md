@@ -190,7 +190,7 @@ def configs = [
 
     // リソース要件（K8s）
     k8s: [
-      image: 'nexus-docker.sk4869.info/honoka4869/jenkins-maven-node:latest',
+      image: 'nexus-docker-pull.sk4869.info/honoka4869/jenkins-maven-node:latest',
       cpuRequest: '500m',
       memRequest: '2Gi',
       cpuLimit: '2',
@@ -207,7 +207,7 @@ def configs = [
     sonarEnabled: true,
     skipTestsByDefault: false,
     k8s: [
-      image: 'nexus-docker.sk4869.info/honoka4869/jenkins-maven-node:latest',
+      image: 'nexus-docker-pull.sk4869.info/honoka4869/jenkins-maven-node:latest',
       cpuRequest: '1',
       memRequest: '4Gi',
       cpuLimit: '4',

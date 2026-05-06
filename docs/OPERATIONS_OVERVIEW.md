@@ -47,11 +47,11 @@
   - `STATE_FILE_PATH` を PVC 配下へ向けると重複処理を防止しやすい
 - `src/network-speedtest.groovy`
   - Jenkins agent: `kubernetes`
-  - 実行方式: Kubernetes Pod ベースのコンテナ実行（既定イメージ `nexus-docker.sk4869.info/nicolaka/netshoot:latest`）
+  - 実行方式: Kubernetes Pod ベースのコンテナ実行（既定イメージ `nexus-docker-pull.sk4869.info/nicolaka/netshoot:latest`）
   - `speedtest-cli` を優先利用し、未導入時は `EXTERNAL_FALLBACK_URL` を `curl` でダウンロードして帯域換算
 - `src/github-copilot-pr-review.groovy`
   - Jenkins agent: `kubernetes`
-  - 実行方式: Kubernetes Pod ベースのコンテナ実行（イメージ `nexus-docker.sk4869.info/honoka4869/jenkins-maven-node:latest`）
+  - 実行方式: Kubernetes Pod ベースのコンテナ実行（イメージ `nexus-docker-pull.sk4869.info/honoka4869/jenkins-maven-node:latest`）
   - トリガー: Generic Webhook Trigger による GitHub `pull_request` イベント（スケジュールなし）
 - スケジュール: 各 pipeline の `cron` 設定に従う（github-copilot-pr-review は Webhook トリガーのみ）
 

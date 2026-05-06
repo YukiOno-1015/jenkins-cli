@@ -5,7 +5,7 @@
  * 動作フロー:
  *   1. GitHub から pull_request イベント Webhook を受信する（opened / synchronize / reopened）
  *   2. ペイロードの $.repository.full_name からリポジトリを動的に取得する
- *   3. nexus-docker.sk4869.info/honoka4869/jenkins-maven-node イメージ（npm 内蔵）に @github/copilot をインストールする
+ *   3. nexus-docker-pull.sk4869.info/honoka4869/jenkins-maven-node イメージ（npm 内蔵）に @github/copilot をインストールする
  *   4. GitHub API で PR の diff を取得し、copilot -p でレビューを生成する
  *   5. GitHub Issues API で PR に通常コメントとして投稿する
  *
@@ -48,7 +48,7 @@ spec:
   - name: nexus
   containers:
   - name: build
-    image: nexus-docker.sk4869.info/honoka4869/jenkins-maven-node:latest
+    image: nexus-docker-pull.sk4869.info/honoka4869/jenkins-maven-node:latest
     command: [cat]
     tty: true
     resources:

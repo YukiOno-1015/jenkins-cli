@@ -24,7 +24,7 @@ pipeline {
   agent {
     kubernetes {
       yaml k8sPodYaml(
-        image: 'nexus-docker.sk4869.info/honoka4869/jenkins-maven-node:latest',
+        image: 'nexus-docker-pull.sk4869.info/honoka4869/jenkins-maven-node:latest',
         imagePullSecret: 'nexus',
         cpuRequest: '500m',
         memRequest: '2Gi',
