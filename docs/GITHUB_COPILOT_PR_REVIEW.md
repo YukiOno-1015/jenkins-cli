@@ -5,7 +5,7 @@
 ## 概要
 
 - トリガー: GitHub `pull_request` Webhook（`opened` / `synchronize` / `reopened` のみ）
-- 実行環境: Kubernetes Pod（`honoka4869/jenkins-maven-node:latest`、npm 内蔵）
+- 実行環境: Kubernetes Pod（`nexus-docker.sk4869.info/honoka4869/jenkins-maven-node:latest`、npm 内蔵）
 - レビュー対象: GitHub API から取得した PR の diff（先頭 100,000 バイトまで）
 - 出力先: 対象 PR の Issue コメント
 

@@ -13,7 +13,7 @@
  *   (必要になった場合は INTERNAL_* 系パラメータと iperf3 ステップを後追いで追加する想定)
  */
 
-@groovy.transform.Field String DEFAULT_AGENT_IMAGE = 'nicolaka/netshoot:latest'
+@groovy.transform.Field String DEFAULT_AGENT_IMAGE = 'nexus-docker.sk4869.info/nicolaka/netshoot:latest'
 
 pipeline {
     agent none
@@ -34,7 +34,7 @@ pipeline {
     parameters {
         string(
             name: 'AGENT_IMAGE',
-            defaultValue: 'nicolaka/netshoot:latest',
+            defaultValue: 'nexus-docker.sk4869.info/nicolaka/netshoot:latest',
             description: 'Pod で利用するコンテナイメージ。curl / speedtest-cli が動くものを指定する'
         )
         string(
