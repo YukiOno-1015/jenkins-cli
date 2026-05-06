@@ -209,9 +209,9 @@ pipeline {
                         return
                     }
 
-                    // 3. DL → Nexus アップロード
+                    // 3. 変種ごとに DL → MD5 → Nexus push → 即削除を完結する
+                    //    （同時に存在する dmg を 1 つに抑え、ephemeral-storage 逼迫を防ぐ）
                     String remoteDir = "${cfg.nexusPrefix}/${detected.version}"
-                    List<Map> downloaded = []
 
                     detected.files.each { Map f ->
                         // ワークスペース直下に DL する。
@@ -239,15 +239,15 @@ pipeline {
                                 echo "MD5 一致: \$actual"
                             """
                         }
-                        downloaded << [local: localPath, file: f]
-                    }
 
-                    downloaded.each { Map d ->
                         nexusRawUpload(
-                            file     : d.local,
+                            file     : localPath,
                             remoteDir: remoteDir,
                             nexusRepo: cfg.nexusRepo
                         )
+
+                        echo "→ ローカル削除: ${localPath}"
+                        sh "rm -f '${shellQuote(localPath)}' 2>/dev/null || true"
                     }
 
                     // 4. state 更新
@@ -307,7 +307,7 @@ pipeline {
 
                     currentBuild.description = "uploaded: ${detected.version} (${detected.buildDate})"
 
-                    // 6. ローカル一時ファイル削除（ephemeral-storage を逼迫させないため）
+                    // 6. 念のためのローカル残骸削除（変種ループ内で都度消しているが保険）
                     sh '''
                         rm -f pleiades-*.dmg 2>/dev/null || true
                     '''
@@ -390,11 +390,11 @@ spec:
         requests:
           cpu: "250m"
           memory: "512Mi"
-          ephemeral-storage: "3Gi"
+          ephemeral-storage: "5Gi"
         limits:
           cpu: "1"
           memory: "1Gi"
-          ephemeral-storage: "5Gi"
+          ephemeral-storage: "10Gi"
       volumeMounts:
         - name: state
           mountPath: "${STATE_MOUNT_PATH}"
