@@ -18,8 +18,9 @@ import groovy.transform.Field
  *   slack-bot-token    (Secret text, 任意)      : Slack chat.postMessage 用 Bot/User Token
  *                                                 SLACK_CHANNEL を空欄にすれば通知自体をスキップする
  *
- * 推奨:
- *   PVC_CLAIM_NAME      : state を Pod 再作成後も維持したい場合に PVC 名を指定する
+ * state 永続化:
+ *   PVC `eclipse-pleiades-state` を /eclipse-monitor-state へマウントする想定。
+ *   PVC 名は PVC_CLAIM_NAME パラメータで上書き可能。空欄なら emptyDir で毎回再 DL。
  *
  * 設計メモ:
  * - Pleiades は API を提供していないため HTML スクレイピング依存
@@ -38,8 +39,11 @@ try {
 }
 
 @Field String DEFAULT_AGENT_IMAGE = 'nexus-docker-pull.sk4869.info/honoka4869/jenkins-maven-node:latest'
-@Field String DEFAULT_STATE_MOUNT_PATH = '/eclipse-monitor-state'
-@Field String DEFAULT_STATE_FILE_NAME = 'pleiades-mac-java.json'
+// state は固定パスに置く（パラメータ化しない）。
+// PVC 名のみ環境差を許容するためパラメータで上書き可能。
+@Field String STATE_MOUNT_PATH = '/eclipse-monitor-state'
+@Field String STATE_FILE_NAME = 'pleiades-mac-java.json'
+@Field String DEFAULT_PVC_CLAIM_NAME = 'eclipse-pleiades-state'
 @Field String DEFAULT_PLEIADES_INDEX_URL = 'https://willbrains.jp/pleiades.html'
 @Field String DEFAULT_DOWNLOAD_BASE_URL = 'https://ftp.jaist.ac.jp/pub/mergedoc/pleiades/'
 @Field String DEFAULT_NEXUS_REPO = 'raw-tools'
@@ -93,18 +97,8 @@ pipeline {
         )
         string(
             name: 'PVC_CLAIM_NAME',
-            defaultValue: '',
-            description: 'state を永続化する PVC 名。空欄時は emptyDir のため Pod 再作成で state が失われ再 DL が走る'
-        )
-        string(
-            name: 'STATE_VOLUME_MOUNT_PATH',
-            defaultValue: DEFAULT_STATE_MOUNT_PATH,
-            description: 'state 用ボリュームのマウント先'
-        )
-        string(
-            name: 'STATE_FILE_PATH',
-            defaultValue: '',
-            description: 'state JSON のパス。空欄時は ${STATE_VOLUME_MOUNT_PATH}/${DEFAULT_STATE_FILE_NAME}'
+            defaultValue: DEFAULT_PVC_CLAIM_NAME,
+            description: "state を永続化する PVC 名。マウント先 ${STATE_MOUNT_PATH} / ファイル ${STATE_FILE_NAME} は固定。空欄なら emptyDir で毎回再 DL"
         )
         booleanParam(
             name: 'DRY_RUN',
@@ -347,12 +341,6 @@ pipeline {
 def buildConfig() {
     String slackChannel = (params.SLACK_CHANNEL ?: '').trim()
 
-    String stateMountPath = (params.STATE_VOLUME_MOUNT_PATH ?: DEFAULT_STATE_MOUNT_PATH).trim() ?: DEFAULT_STATE_MOUNT_PATH
-    String stateFilePath = (params.STATE_FILE_PATH ?: '').trim()
-    if (!stateFilePath) {
-        stateFilePath = "${stateMountPath}/${DEFAULT_STATE_FILE_NAME}"
-    }
-
     List<String> targetVariants = ((params.TARGET_VARIANTS ?: 'mac,mac-jre') as String)
         .split(',')
         .collect { it.trim() }
@@ -367,15 +355,14 @@ def buildConfig() {
         slackChannel          : slackChannel,
         slackTokenCredentialId: ((params.SLACK_TOKEN_CREDENTIAL_ID ?: 'slack-bot-token') as String).trim(),
         pvcClaimName          : (params.PVC_CLAIM_NAME ?: '').trim(),
-        stateMountPath        : stateMountPath,
-        stateFilePath         : stateFilePath,
+        stateMountPath        : STATE_MOUNT_PATH,
+        stateFilePath         : "${STATE_MOUNT_PATH}/${STATE_FILE_NAME}",
         dryRun                : params.DRY_RUN == true,
         force                 : params.FORCE == true
     ]
 }
 
 def buildAgentPodYaml() {
-    String mountPath = ((params.STATE_VOLUME_MOUNT_PATH ?: DEFAULT_STATE_MOUNT_PATH) as String).trim() ?: DEFAULT_STATE_MOUNT_PATH
     String pvcClaimName = (params.PVC_CLAIM_NAME ?: '').trim()
 
     String volumeSource = pvcClaimName
@@ -407,7 +394,7 @@ spec:
           ephemeral-storage: "5Gi"
       volumeMounts:
         - name: state
-          mountPath: "${mountPath}"
+          mountPath: "${STATE_MOUNT_PATH}"
   volumes:
     - name: state
       ${volumeSource}
