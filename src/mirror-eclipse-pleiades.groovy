@@ -1,5 +1,4 @@
 import groovy.json.JsonOutput
-import groovy.json.JsonSlurperClassic
 import groovy.transform.Field
 
 /*
@@ -41,7 +40,8 @@ try {
 @Field String DEFAULT_AGENT_IMAGE = 'nexus-docker-pull.sk4869.info/honoka4869/jenkins-maven-node:latest'
 @Field String DEFAULT_STATE_MOUNT_PATH = '/eclipse-monitor-state'
 @Field String DEFAULT_STATE_FILE_NAME = 'pleiades-mac-java.json'
-@Field String DEFAULT_PLEIADES_INDEX_URL = 'https://willbrains.jp/'
+@Field String DEFAULT_PLEIADES_INDEX_URL = 'https://willbrains.jp/pleiades.html'
+@Field String DEFAULT_DOWNLOAD_BASE_URL = 'https://ftp.jaist.ac.jp/pub/mergedoc/pleiades/'
 @Field String DEFAULT_NEXUS_REPO = 'raw-tools'
 @Field String DEFAULT_NEXUS_PREFIX = 'eclipse'
 
@@ -67,9 +67,9 @@ pipeline {
             description: 'Pleiades 公式インデックスページ URL'
         )
         string(
-            name: 'TARGET_ARCHES',
-            defaultValue: 'aarch64,64bit',
-            description: 'Mac の対象アーキテクチャ（カンマ区切り。aarch64=Apple Silicon, 64bit=Intel）'
+            name: 'TARGET_VARIANTS',
+            defaultValue: 'mac,mac-jre',
+            description: 'Mac/Java の対象バリアント（カンマ区切り。mac=JRE 同梱なし、mac-jre=JRE 同梱）'
         )
         string(
             name: 'NEXUS_REPO',
@@ -135,7 +135,7 @@ pipeline {
                     echo 'Pleiades Eclipse ミラーリング'
                     echo '========================================='
                     echo "Index URL          : ${cfg.indexUrl}"
-                    echo "Target Arches      : ${cfg.targetArches.join(', ')}"
+                    echo "Target Variants    : ${cfg.targetVariants.join(', ')}"
                     echo "Nexus Repo         : ${cfg.nexusRepo}"
                     echo "Nexus Prefix       : ${cfg.nexusPrefix}"
                     echo "State File         : ${cfg.stateFilePath}"
@@ -160,8 +160,9 @@ pipeline {
                     writeFile(
                         file: '.pleiades-detect-config.json',
                         text: JsonOutput.toJson([
-                            indexUrl    : cfg.indexUrl,
-                            targetArches: cfg.targetArches
+                            indexUrl       : cfg.indexUrl,
+                            downloadBaseUrl: cfg.downloadBaseUrl,
+                            targetVariants : cfg.targetVariants
                         ])
                     )
 
@@ -175,17 +176,17 @@ pipeline {
                         cat .pleiades-detect-result.json
                     '''
 
-                    def detected = new JsonSlurperClassic().parseText(readFile('.pleiades-detect-result.json'))
+                    def detected = readJSON(file: '.pleiades-detect-result.json')
                     if (detected.error) {
                         error("最新版検出に失敗しました: ${detected.error}")
                     }
                     if (!detected.files || (detected.files as List).isEmpty()) {
-                        error('検出結果に対象アーキテクチャのファイルが含まれていません。TARGET_ARCHES を確認してください。')
+                        error('検出結果に対象バリアントのファイルが含まれていません。TARGET_VARIANTS を確認してください。')
                     }
 
-                    echo "検出: version=${detected.version}, buildDate=${detected.buildDate}, files=${detected.files.size()}"
+                    echo "検出: year=${detected.year}, version=${detected.version}, buildDate=${detected.buildDate}, files=${detected.files.size()}"
                     detected.files.each { f ->
-                        echo "  - ${f.arch}: ${f.filename}"
+                        echo "  - ${f.variant}: ${f.filename}${f.md5 ? " (MD5: ${f.md5})" : ''}"
                         echo "      ${f.downloadUrl}"
                     }
 
@@ -228,6 +229,19 @@ pipeline {
                               '${shellQuote(f.downloadUrl)}'
                             ls -lh '${shellQuote(localPath)}'
                         """
+                        if (f.md5) {
+                            echo "→ MD5 検証: ${f.md5}"
+                            sh """#!/bin/bash
+                                set -euo pipefail
+                                actual=\$(md5sum '${shellQuote(localPath)}' | awk '{print \$1}')
+                                expected='${shellQuote(f.md5.toString().toLowerCase())}'
+                                if [ "\$actual" != "\$expected" ]; then
+                                    echo "MD5 不一致: expected=\$expected, actual=\$actual" >&2
+                                    exit 1
+                                fi
+                                echo "MD5 一致: \$actual"
+                            """
+                        }
                         downloaded << [local: localPath, file: f]
                     }
 
@@ -241,12 +255,13 @@ pipeline {
 
                     // 4. state 更新
                     def newState = [
+                        year     : detected.year,
                         version  : detected.version,
                         buildDate: detected.buildDate,
                         updatedAt: new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX", TimeZone.getTimeZone('Asia/Tokyo')),
                         nexusRepo: cfg.nexusRepo,
                         nexusPath: remoteDir,
-                        files    : detected.files.collect { [arch: it.arch, filename: it.filename] }
+                        files    : detected.files.collect { [variant: it.variant, filename: it.filename, md5: it.md5] }
                     ]
                     writeFile(
                         file: cfg.stateFilePath,
@@ -267,7 +282,7 @@ pipeline {
                                 lines << ''
                                 lines << 'Files:'
                                 detected.files.each { f ->
-                                    lines << "  - ${f.arch}: ${f.filename}"
+                                    lines << "  - ${f.variant}: ${f.filename}"
                                 }
                                 if (env.BUILD_URL) {
                                     lines << ''
@@ -338,14 +353,15 @@ def buildConfig() {
         stateFilePath = "${stateMountPath}/${DEFAULT_STATE_FILE_NAME}"
     }
 
-    List<String> targetArches = ((params.TARGET_ARCHES ?: 'aarch64,64bit') as String)
+    List<String> targetVariants = ((params.TARGET_VARIANTS ?: 'mac,mac-jre') as String)
         .split(',')
         .collect { it.trim() }
         .findAll { it }
 
     return [
         indexUrl              : ((params.PLEIADES_INDEX_URL ?: DEFAULT_PLEIADES_INDEX_URL) as String).trim(),
-        targetArches          : targetArches,
+        downloadBaseUrl       : DEFAULT_DOWNLOAD_BASE_URL,
+        targetVariants        : targetVariants,
         nexusRepo             : ((params.NEXUS_REPO ?: DEFAULT_NEXUS_REPO) as String).trim(),
         nexusPrefix           : (((params.NEXUS_REMOTE_DIR_PREFIX ?: DEFAULT_NEXUS_PREFIX) as String).trim()).replaceAll('/+$', ''),
         slackChannel          : slackChannel,
@@ -409,7 +425,7 @@ def loadState(String stateFilePath) {
     }
 
     try {
-        return new JsonSlurperClassic().parseText(output)
+        return readJSON(text: output)
     } catch (Exception ignored) {
         return [version: null, buildDate: null]
     }
@@ -464,14 +480,23 @@ PY
  * 検出スクリプト (Python)
  * ============================================================
  *
- * 役割:
- * - 与えられたインデックス URL を起点に、Pleiades の Mac/Java dmg リンクを集める
- * - サブページ (.html リンク) を 1 階層だけ追跡し、最大 30 件まで巡回する
- * - (version, buildDate) の最大値を最新版として返す
+ * 動作:
+ * 1. PLEIADES_INDEX_URL (既定 willbrains.jp/pleiades.html) をフェッチ
+ * 2. 中の `pleiades_distros<YYYY>.html` リンクから最新年を選択
+ * 3. その distros ページから `pleiades-redirect/<year>/pleiades_java-mac(_jre)?\.zip\.html?v=<YYYYMMDD>` を抽出
+ * 4. 各 redirect ページを取得し、<title> から実 dmg ファイル名と MD5 を抽出
+ * 5. 実ダウンロード URL は `<downloadBaseUrl><year>/<filename>` で組み立てる
  *
- * 出力 (--output 先 JSON):
- *   {"version": "2024-12", "buildDate": "20241226",
- *    "files": [{"arch": "aarch64", "filename": "...", "downloadUrl": "..."}, ...]}
+ * 出力 (--output 先 JSON) 例:
+ *   {
+ *     "year": 2026,
+ *     "version": "2026-03",
+ *     "buildDate": "20260322",
+ *     "files": [
+ *       {"variant": "mac",     "filename": "...", "downloadUrl": "...", "md5": "..."},
+ *       {"variant": "mac-jre", "filename": "...", "downloadUrl": "...", "md5": "..."}
+ *     ]
+ *   }
  * 失敗時:
  *   {"error": "..."}
  */
@@ -480,43 +505,17 @@ String buildDetectScript() {
 import argparse
 import json
 import re
-import sys
 import urllib.request
 from urllib.parse import urljoin
 
 
 USER_AGENT = "jenkins-pleiades-monitor/1.0"
-SUB_PAGE_LIMIT = 30
 
 
 def fetch(url):
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     with urllib.request.urlopen(req, timeout=60) as resp:
         return resp.read().decode("utf-8", errors="replace")
-
-
-def collect_dmg(html, base_url, candidates):
-    pattern = re.compile(
-        r\'href="([^"]*pleiades-(\\d{4}-\\d{2})(?:-r\\d+)?-java-mac-(aarch64|64bit)_(\\d{8})\\.dmg)"\',
-        re.IGNORECASE,
-    )
-    for m in pattern.finditer(html):
-        href = m.group(1)
-        version = m.group(2)
-        arch = m.group(3).lower()
-        build_date = m.group(4)
-        abs_url = urljoin(base_url, href)
-        key = (version, build_date)
-        candidates.setdefault(key, {})[arch] = {
-            "arch": arch,
-            "filename": abs_url.rsplit("/", 1)[-1],
-            "downloadUrl": abs_url,
-        }
-
-
-def collect_sub_links(html):
-    sub_pattern = re.compile(r\'href="([^"]+\\.html)"\', re.IGNORECASE)
-    return list(set(sub_pattern.findall(html)))
 
 
 def main():
@@ -529,50 +528,127 @@ def main():
         cfg = json.load(fh)
 
     index_url = cfg["indexUrl"]
-    target_arches = [a.strip().lower() for a in cfg.get("targetArches", []) if a.strip()]
+    download_base = cfg.get("downloadBaseUrl", "https://ftp.jaist.ac.jp/pub/mergedoc/pleiades/")
+    if not download_base.endswith("/"):
+        download_base += "/"
+    target_variants = [v.strip().lower() for v in cfg.get("targetVariants", []) if v.strip()]
 
     result = {}
     try:
-        candidates = {}
+        # 1. インデックスページから distros<YYYY>.html を集める
         index_html = fetch(index_url)
-        collect_dmg(index_html, index_url, candidates)
-
-        # サブページを追う。version らしき URL（数字を含む）を優先するため降順ソートする
-        sub_links = sorted(collect_sub_links(index_html), reverse=True)
-        seen = set()
-        for href in sub_links:
-            sub_url = urljoin(index_url, href)
-            if sub_url == index_url or sub_url in seen:
-                continue
-            seen.add(sub_url)
+        year_pattern = re.compile(r\'href="(pleiades_distros(\\d{4})\\.html)"\')
+        year_pairs = []
+        for m in year_pattern.finditer(index_html):
             try:
-                sub_html = fetch(sub_url)
-            except Exception:
+                year_pairs.append((int(m.group(2)), m.group(1)))
+            except ValueError:
                 continue
-            collect_dmg(sub_html, sub_url, candidates)
-            if len(seen) >= SUB_PAGE_LIMIT:
-                break
 
-        if not candidates:
-            result = {"error": "no Pleiades Mac/Java dmg found in index or sub pages"}
-        else:
-            latest = max(candidates.keys())
-            version, build_date = latest
-            files = []
-            for arch in target_arches:
-                if arch in candidates[latest]:
-                    files.append(candidates[latest][arch])
-            result = {
+        if not year_pairs:
+            result = {"error": "no pleiades_distros<YYYY>.html links found in index"}
+            with open(args.output, "w", encoding="utf-8") as fh:
+                json.dump(result, fh, ensure_ascii=False, indent=2)
+            return
+
+        latest_year, distros_href = max(year_pairs)
+        distros_url = urljoin(index_url, distros_href)
+
+        # 2. 最新年の distros ページから Mac/Java の redirect URL を抽出
+        # URL では `pleiades_java-mac_jre.zip.html` (アンダースコア) だが
+        # 実 dmg ファイル名は `pleiades-...-java-mac-jre_...dmg` (ハイフン) と表記が異なる。
+        # ここでは URL 内の表記 (mac / mac_jre) を捕捉し、後で 'mac-jre' へ正規化する。
+        distros_html = fetch(distros_url)
+        redirect_pattern = re.compile(
+            r\'href="(pleiades-redirect/\' + str(latest_year)
+            + r\'/pleiades_java-(mac(?:_jre)?)\\.zip\\.html\\?v=(\\d{8}))"\',
+            re.IGNORECASE,
+        )
+
+        seen = set()
+        files = []
+        for m in redirect_pattern.finditer(distros_html):
+            href, raw_variant, build_date = m.group(1), m.group(2).lower(), m.group(3)
+            # URL 内の `mac_jre` → `mac-jre` へ正規化（ユーザー指定の表記と揃える）
+            variant = raw_variant.replace("_", "-")
+            key = (variant, build_date)
+            if key in seen:
+                continue
+            seen.add(key)
+            if target_variants and variant not in target_variants:
+                continue
+
+            redirect_url = urljoin(distros_url, href)
+            try:
+                redirect_html = fetch(redirect_url)
+            except Exception as e:
+                files.append({
+                    "variant": variant,
+                    "error": f"redirect fetch failed: {e}",
+                })
+                continue
+
+            # <title>ダウンロード pleiades-2026-03-java-mac-jre_20260322.dmg</title>
+            title_match = re.search(r\'<title>[^<]*?(pleiades-[^\\s<]+\\.dmg)\', redirect_html)
+            if not title_match:
+                continue
+            filename = title_match.group(1)
+
+            fn_match = re.match(
+                r\'pleiades-(\\d{4}-\\d{2})(?:-r\\d+)?-java-mac(?:-jre)?_\\d{8}\\.dmg\',
+                filename,
+            )
+            if not fn_match:
+                continue
+            version = fn_match.group(1)
+
+            md5_match = re.search(r\'MD5:\\s*([0-9a-fA-F]{32})\', redirect_html)
+            md5 = md5_match.group(1).lower() if md5_match else None
+
+            download_url = download_base + str(latest_year) + "/" + filename
+
+            files.append({
+                "variant": variant,
+                "filename": filename,
+                "downloadUrl": download_url,
+                "md5": md5,
                 "version": version,
                 "buildDate": build_date,
-                "files": files,
-            }
-            if not files:
-                result["error"] = (
-                    f"target arch not found in latest. "
-                    f"requested={target_arches} "
-                    f"available={sorted(candidates[latest].keys())}"
+            })
+
+        if not files:
+            result = {
+                "error": (
+                    f"no Mac/Java dmg redirect found on {distros_url} "
+                    f"(targetVariants={target_variants})"
                 )
+            }
+        else:
+            valid = [f for f in files if "filename" in f]
+            if not valid:
+                result = {"error": "all candidates failed to resolve filename"}
+            else:
+                # 全変種で同一 (version, buildDate) のものを最新として採用する
+                valid.sort(key=lambda f: (f["version"], f["buildDate"]))
+                latest = valid[-1]
+                target_files = [
+                    {
+                        "variant": f["variant"],
+                        "filename": f["filename"],
+                        "downloadUrl": f["downloadUrl"],
+                        "md5": f["md5"],
+                    }
+                    for f in valid
+                    if f["version"] == latest["version"]
+                    and f["buildDate"] == latest["buildDate"]
+                ]
+                result = {
+                    "year": latest_year,
+                    "version": latest["version"],
+                    "buildDate": latest["buildDate"],
+                    "files": target_files,
+                }
+
     except Exception as e:
         result = {"error": f"{type(e).__name__}: {e}"}
 
