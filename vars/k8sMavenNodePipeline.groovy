@@ -43,25 +43,32 @@ def call(Map cfg = [:]) {
     def mavenCommand = cfg.get('mavenCommand', 'mvn -B clean package')
 
     // ---- JUnit / Coverage 公開設定 ----
-    // Portal_App / Portal_App_Backend では pom.xml に jacoco-maven-plugin が無い場合でも
-    // CLI から `prepare-agent` / `report` ゴールを直接呼び出してカバレッジを生成する。
-    // pom.xml 側で既に有効な場合でも二重実行は害にならないため、デフォルトで ON にしている。
+    // 既定方針:
+    // - JUnit / Coverage の「公開」は常に行う（junit / recordCoverage / Markdown 表）
+    // - JaCoCo の「実行」は pom.xml 側のプラグイン設定に任せ、CLI 注入はデフォルト OFF
+    //
+    // 過去の事故: pom.xml 側で jacoco-maven-plugin が定義済みのリポジトリ
+    //   （例: Portal_App_Backend の 0.8.11）に対して CLI から 0.8.12 を追加注入すると、
+    //   surefire fork に `-javaagent` が 2 重に渡って `jacoco.exec` を奪い合い、
+    //   JVM が exit 134 でクラッシュする。
+    //   pom.xml が JaCoCo を持たないリポでは opt-in で `injectJacoco: true` を指定する。
     def enableJUnit = cfg.containsKey('enableJUnit') ? cfg.get('enableJUnit').toString().toBoolean() : true
     def enableCoverage = cfg.containsKey('enableCoverage') ? cfg.get('enableCoverage').toString().toBoolean() : true
     def jacocoMavenPluginVersion = cfg.get('jacocoMavenPluginVersion', '0.8.12')?.toString()?.trim()
     def junitPattern = cfg.get('junitPattern', '**/target/surefire-reports/*.xml')?.toString()?.trim()
     def coveragePattern = cfg.get('coveragePattern', '**/target/site/jacoco/jacoco.xml')?.toString()?.trim()
 
-    // mavenCommand が cfg で明示上書きされている場合、自動 JaCoCo 注入は無効化する
-    // （ユーザー側の独自コマンドを尊重するため）
-    def injectJacoco = enableCoverage && !mavenCommandOverridden
+    // CLI 注入はデフォルト OFF。pom.xml に JaCoCo が無いリポでだけ true にする。
+    // mavenCommand が cfg で明示上書きされている場合も注入は無効化する（独自コマンドを尊重）。
+    def injectJacocoRequested = cfg.containsKey('injectJacoco') ? cfg.get('injectJacoco').toString().toBoolean() : false
+    def injectJacoco = injectJacocoRequested && !mavenCommandOverridden
     def jacocoPrepareGoal = injectJacoco ? "org.jacoco:jacoco-maven-plugin:${jacocoMavenPluginVersion}:prepare-agent" : ''
     def jacocoReportGoal = injectJacoco ? "org.jacoco:jacoco-maven-plugin:${jacocoMavenPluginVersion}:report" : ''
     if (injectJacoco) {
         // 既定の `mvn -B clean package` に対し、`clean` の直後に prepare-agent を、末尾に report を差し込む
         mavenCommand = mavenCommand.replaceFirst(/\bclean\b/, "clean ${jacocoPrepareGoal}") + " ${jacocoReportGoal}"
-    } else if (mavenCommandOverridden && enableCoverage) {
-        echo "⚠️ mavenCommand が上書きされているため、JaCoCo の自動注入をスキップしました。" +
+    } else if (injectJacocoRequested && mavenCommandOverridden) {
+        echo "⚠️ mavenCommand が上書きされているため、JaCoCo の CLI 注入をスキップしました。" +
              " カバレッジを公開したい場合は mavenCommand 側で prepare-agent / report を含めてください。"
     }
 

@@ -13,6 +13,8 @@
  *   - コンソールログ: Markdown 表（`=== Test & Coverage Summary ===` 以降）
  *   - ビルド説明欄: `Tests: N (NG=x, Skip=y) / LineCov: zz.z%`
  *   - 無効化したい場合は `enableJUnit: false` / `enableCoverage: false` を渡す。
+ *   - JaCoCo の実行は pom.xml 側のプラグイン設定に任せる（CLI 注入はデフォルト OFF）。
+ *     pom.xml に jacoco-maven-plugin が無いリポジトリでだけ `injectJacoco: true` を渡す。
  */
 
 def libBranch = env.CHANGE_BRANCH ?: env.BRANCH_NAME ?: 'main'
