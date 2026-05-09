@@ -8,6 +8,11 @@
  * 運用メモ:
  * - PR / ブランチビルドでは現在のブランチ名に追従した Shared Library を優先して読み込みます。
  * - ライブラリ読み込みに失敗した場合でも `main` へ自動フォールバックし、運用停止を避けます。
+ * - JUnit (Surefire) のテスト結果と JaCoCo カバレッジは Shared Library 側で自動公開されます。
+ *   - Jenkins UI: Test Result / Coverage Trend
+ *   - コンソールログ: Markdown 表（`=== Test & Coverage Summary ===` 以降）
+ *   - ビルド説明欄: `Tests: N (NG=x, Skip=y) / LineCov: zz.z%`
+ *   - 無効化したい場合は `enableJUnit: false` / `enableCoverage: false` を渡す。
  */
 
 def libBranch = env.CHANGE_BRANCH ?: env.BRANCH_NAME ?: 'main'

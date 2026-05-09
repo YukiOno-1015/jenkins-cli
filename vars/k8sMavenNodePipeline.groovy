@@ -39,7 +39,31 @@ def call(Map cfg = [:]) {
 
     def mavenProfileChoices = cfg.get('mavenProfileChoices', repoConfig.buildProfiles)
     def mavenDefaultProfile = cfg.get('mavenDefaultProfile', repoConfig.defaultProfile)
+    def mavenCommandOverridden = cfg.containsKey('mavenCommand')
     def mavenCommand = cfg.get('mavenCommand', 'mvn -B clean package')
+
+    // ---- JUnit / Coverage 公開設定 ----
+    // Portal_App / Portal_App_Backend では pom.xml に jacoco-maven-plugin が無い場合でも
+    // CLI から `prepare-agent` / `report` ゴールを直接呼び出してカバレッジを生成する。
+    // pom.xml 側で既に有効な場合でも二重実行は害にならないため、デフォルトで ON にしている。
+    def enableJUnit = cfg.containsKey('enableJUnit') ? cfg.get('enableJUnit').toString().toBoolean() : true
+    def enableCoverage = cfg.containsKey('enableCoverage') ? cfg.get('enableCoverage').toString().toBoolean() : true
+    def jacocoMavenPluginVersion = cfg.get('jacocoMavenPluginVersion', '0.8.12')?.toString()?.trim()
+    def junitPattern = cfg.get('junitPattern', '**/target/surefire-reports/*.xml')?.toString()?.trim()
+    def coveragePattern = cfg.get('coveragePattern', '**/target/site/jacoco/jacoco.xml')?.toString()?.trim()
+
+    // mavenCommand が cfg で明示上書きされている場合、自動 JaCoCo 注入は無効化する
+    // （ユーザー側の独自コマンドを尊重するため）
+    def injectJacoco = enableCoverage && !mavenCommandOverridden
+    def jacocoPrepareGoal = injectJacoco ? "org.jacoco:jacoco-maven-plugin:${jacocoMavenPluginVersion}:prepare-agent" : ''
+    def jacocoReportGoal = injectJacoco ? "org.jacoco:jacoco-maven-plugin:${jacocoMavenPluginVersion}:report" : ''
+    if (injectJacoco) {
+        // 既定の `mvn -B clean package` に対し、`clean` の直後に prepare-agent を、末尾に report を差し込む
+        mavenCommand = mavenCommand.replaceFirst(/\bclean\b/, "clean ${jacocoPrepareGoal}") + " ${jacocoReportGoal}"
+    } else if (mavenCommandOverridden && enableCoverage) {
+        echo "⚠️ mavenCommand が上書きされているため、JaCoCo の自動注入をスキップしました。" +
+             " カバレッジを公開したい場合は mavenCommand 側で prepare-agent / report を含めてください。"
+    }
 
     def archivePattern = cfg.get('archivePattern', repoConfig.archivePattern)
     def skipArchive = cfg.get('skipArchive', repoConfig.skipArchive)
@@ -103,7 +127,7 @@ def call(Map cfg = [:]) {
     def cpuLim = cfg.get('cpuLimit', repoConfig.k8s.cpuLimit)
     def memLim = cfg.get('memLimit', repoConfig.k8s.memLimit)
 
-    echo "ビルド設定サマリ: branch=${gitBranch}, profile=${mavenDefaultProfile}, archivePattern=${archivePattern}, skipArchive=${skipArchive}, enableSonarQube=${enableSonarQube}"
+    echo "ビルド設定サマリ: branch=${gitBranch}, profile=${mavenDefaultProfile}, archivePattern=${archivePattern}, skipArchive=${skipArchive}, enableSonarQube=${enableSonarQube}, enableJUnit=${enableJUnit}, enableCoverage=${enableCoverage}, jacocoVersion=${jacocoMavenPluginVersion}, injectJacoco=${injectJacoco}"
     echo "配備設定サマリ: enableRemoteDeploy=${enableRemoteDeploy}, runDeployCommand=${runDeployCommand}, deployArtifactPattern=${deployArtifactPattern}, deployTargetDir=${deployTargetDir}, deployUploadDir=${deployUploadDir}, deployUseSudo=${deployUseSudo}"
     echo "Kubernetes 実行設定: namespace=${k8sNamespace}, image=${image}, cpu=${cpuReq}-${cpuLim}, memory=${memReq}-${memLim}, imagePullSecret=${imagePullSecret}"
 
@@ -215,6 +239,18 @@ def call(Map cfg = [:]) {
                         }
                     }
                 }
+                post {
+                    always {
+                        script {
+                            publishTestsAndCoverageReport(
+                                enableJUnit: enableJUnit,
+                                enableCoverage: enableCoverage,
+                                junitPattern: junitPattern,
+                                coveragePattern: coveragePattern
+                            )
+                        }
+                    }
+                }
             }
 
             stage('Maven Build(SonarQube Analysis)') {
@@ -298,7 +334,7 @@ def call(Map cfg = [:]) {
                                                                             echo "=== ビルド開始: profile=${mavenDefaultProfile} ==="
 
                                       PROJECT_NAME="${sonarProjectName}"
-                                                                            mvn -e clean verify -P "${mavenDefaultProfile}" -DskipTests=false \
+                                                                            mvn -e clean ${jacocoPrepareGoal} verify ${jacocoReportGoal} -P "${mavenDefaultProfile}" -DskipTests=false \
                                       org.sonarsource.scanner.maven:sonar-maven-plugin:${sonarMavenPluginVersion}:sonar \
                                                                                 -Dsonar.projectKey=\${PROJECT_NAME}_${sonarBranchSuffix} \
                                                                                 -Dsonar.projectName=\${PROJECT_NAME}_${sonarBranchSuffix} \
@@ -313,6 +349,16 @@ def call(Map cfg = [:]) {
                     }
                 }
                 post {
+                    always {
+                        script {
+                            publishTestsAndCoverageReport(
+                                enableJUnit: enableJUnit,
+                                enableCoverage: enableCoverage,
+                                junitPattern: junitPattern,
+                                coveragePattern: coveragePattern
+                            )
+                        }
+                    }
                     success {
                         echo "✅ SonarQube analysis completed - check results at ${sonarQubeUrl}"
                     }
@@ -580,4 +626,161 @@ private String sanitizeForPathSegment(String value) {
 private String sanitizeForSonarProjectKey(String value) {
     def sanitized = (value ?: 'main').replaceAll('[^A-Za-z0-9_.:-]', '_')
     return sanitized ?: 'main'
+}
+
+/**
+ * JUnit / JaCoCo の集計を行い、コンソールに Markdown 表で出力しつつ
+ * Jenkins UI 用に `junit` / `recordCoverage` を呼び、ビルド説明欄にも要約を貼る。
+ *
+ * - `junit` ステップ: 標準のテスト結果 UI に流す
+ * - `recordCoverage` ステップ: Coverage Plugin が入っていればトレンドグラフを生成する
+ * - Markdown 表: コンソールログから Slack/Qiita などへ転記しやすくする
+ * - currentBuild.description: ジョブ一覧から一目で Tests / LineCov を確認できるようにする
+ *
+ * 集計部はシェルで実装している。Pipeline (CPS) 上で巨大 XML を Groovy 正規表現
+ * イテレータで処理すると sandbox/CPS 周りで詰まりやすいため、
+ * パース・集計はサブプロセス側に寄せ、Groovy 側は表示と公開ステップに専念する。
+ */
+def publishTestsAndCoverageReport(Map opts = [:]) {
+    def enableJUnit = opts.containsKey('enableJUnit') ? opts.get('enableJUnit').toString().toBoolean() : true
+    def enableCoverage = opts.containsKey('enableCoverage') ? opts.get('enableCoverage').toString().toBoolean() : true
+    def junitPattern = opts.get('junitPattern', '**/target/surefire-reports/*.xml')?.toString()?.trim()
+    def coveragePattern = opts.get('coveragePattern', '**/target/site/jacoco/jacoco.xml')?.toString()?.trim()
+
+    catchError(buildResult: currentBuild.currentResult, stageResult: 'SUCCESS') {
+        // --- シェルで集計し、Markdown 表 + 機械可読な要約行を stdout に出す ---
+        def summaryOutput = ''
+        try {
+            summaryOutput = sh(returnStdout: true, script: '''#!/bin/bash
+set -uo pipefail
+
+# Surefire / Failsafe の testsuite 属性を合算する
+sf_tests=0; sf_failures=0; sf_errors=0; sf_skipped=0
+while IFS= read -r f; do
+  [ -z "$f" ] && continue
+  # 1ファイルにつき先頭の <testsuite ...> 要素のみを参照する
+  head=$(grep -oE '<testsuite[^>]*>' "$f" | head -1 || true)
+  [ -z "$head" ] && continue
+  t=$(printf '%s' "$head" | grep -oE 'tests="[0-9]+"' | head -1 | grep -oE '[0-9]+' || echo 0)
+  fa=$(printf '%s' "$head" | grep -oE 'failures="[0-9]+"' | head -1 | grep -oE '[0-9]+' || echo 0)
+  e=$(printf '%s' "$head" | grep -oE 'errors="[0-9]+"' | head -1 | grep -oE '[0-9]+' || echo 0)
+  s=$(printf '%s' "$head" | grep -oE 'skipped="[0-9]+"' | head -1 | grep -oE '[0-9]+' || echo 0)
+  sf_tests=$((sf_tests + ${t:-0}))
+  sf_failures=$((sf_failures + ${fa:-0}))
+  sf_errors=$((sf_errors + ${e:-0}))
+  sf_skipped=$((sf_skipped + ${s:-0}))
+done < <(find . \\( -path '*/target/surefire-reports/TEST-*.xml' -o -path '*/target/failsafe-reports/TEST-*.xml' \\) -type f 2>/dev/null)
+
+# JaCoCo: 各 jacoco.xml の最後の <counter type=...> がレポート全体の集計値
+declare -A jc_missed
+declare -A jc_covered
+for type in INSTRUCTION BRANCH LINE COMPLEXITY METHOD CLASS; do
+  jc_missed[$type]=0
+  jc_covered[$type]=0
+done
+
+jacoco_files=0
+while IFS= read -r f; do
+  [ -z "$f" ] && continue
+  jacoco_files=$((jacoco_files + 1))
+  for type in INSTRUCTION BRANCH LINE COMPLEXITY METHOD CLASS; do
+    last=$(grep -oE "<counter type=\\"$type\\" missed=\\"[0-9]+\\" covered=\\"[0-9]+\\"" "$f" | tail -1 || true)
+    if [ -n "$last" ]; then
+      m=$(printf '%s' "$last" | grep -oE 'missed="[0-9]+"' | grep -oE '[0-9]+' || echo 0)
+      c=$(printf '%s' "$last" | grep -oE 'covered="[0-9]+"' | grep -oE '[0-9]+' || echo 0)
+      jc_missed[$type]=$((jc_missed[$type] + ${m:-0}))
+      jc_covered[$type]=$((jc_covered[$type] + ${c:-0}))
+    fi
+  done
+done < <(find . -path '*/target/site/jacoco/jacoco.xml' -type f 2>/dev/null)
+
+passed=$((sf_tests - sf_failures - sf_errors - sf_skipped))
+
+echo ""
+echo "=== Test & Coverage Summary ==="
+echo ""
+echo "#### JUnit (Surefire/Failsafe)"
+echo ""
+echo "| Tests | Passed | Failures | Errors | Skipped |"
+echo "|------:|-------:|---------:|-------:|--------:|"
+echo "| $sf_tests | $passed | $sf_failures | $sf_errors | $sf_skipped |"
+echo ""
+echo "#### Coverage (JaCoCo)"
+echo ""
+if [ "$jacoco_files" -gt 0 ]; then
+  echo "| Metric      | Covered | Missed | Total | Coverage |"
+  echo "|:------------|--------:|-------:|------:|---------:|"
+  for type in INSTRUCTION BRANCH LINE METHOD CLASS COMPLEXITY; do
+    m=${jc_missed[$type]}
+    c=${jc_covered[$type]}
+    total=$((m + c))
+    if [ "$total" -gt 0 ]; then
+      pct=$(awk -v c="$c" -v t="$total" 'BEGIN { printf "%.2f%%", (c*100.0)/t }')
+    else
+      pct="N/A"
+    fi
+    printf "| %-11s | %7d | %6d | %5d | %8s |\\n" "$type" "$c" "$m" "$total" "$pct"
+  done
+else
+  echo "_jacoco.xml が見つかりませんでした。pom.xml に jacoco-maven-plugin の設定があるか、CLI 注入が成功しているか確認してください。_"
+fi
+
+# 機械可読サマリ（Groovy 側で description に使う）
+m=${jc_missed[LINE]}
+c=${jc_covered[LINE]}
+total=$((m + c))
+if [ "$total" -gt 0 ]; then
+  line_pct=$(awk -v c="$c" -v t="$total" 'BEGIN { printf "%.1f%%", (c*100.0)/t }')
+else
+  line_pct="N/A"
+fi
+echo ""
+echo "TEST_COVERAGE_SUMMARY tests=$sf_tests passed=$passed failures=$sf_failures errors=$sf_errors skipped=$sf_skipped line_coverage=$line_pct jacoco_files=$jacoco_files"
+''')
+        } catch (shErr) {
+            echo "Test/Coverage 集計シェルでエラー: ${shErr.message}"
+        }
+
+        if (summaryOutput) {
+            echo summaryOutput
+        }
+
+        // --- Jenkins UI: JUnit ---
+        if (enableJUnit) {
+            try {
+                junit testResults: junitPattern, allowEmptyResults: true, skipPublishingChecks: true
+            } catch (junitErr) {
+                echo "junit ステップでエラー: ${junitErr.message}"
+            }
+        }
+
+        // --- Jenkins UI: Coverage Plugin ---
+        if (enableCoverage) {
+            try {
+                recordCoverage(
+                    tools: [[parser: 'JACOCO', pattern: coveragePattern]],
+                    sourceCodeRetention: 'EVERY_BUILD'
+                )
+            } catch (recErr) {
+                echo "recordCoverage 呼び出しに失敗: ${recErr.message}（Coverage Plugin が未導入の可能性。コンソールの Markdown 表で代替確認してください）"
+            }
+        }
+
+        // --- ビルド説明欄に1行サマリを追記 ---
+        try {
+            def line = summaryOutput ? summaryOutput.readLines().reverse().find { it?.startsWith('TEST_COVERAGE_SUMMARY ') } : null
+            if (line) {
+                def fields = [:]
+                line.replaceFirst('TEST_COVERAGE_SUMMARY ', '').tokenize(' ').each { kv ->
+                    def parts = kv.split('=', 2)
+                    if (parts.length == 2) { fields[parts[0]] = parts[1] }
+                }
+                def fails = ((fields['failures'] ?: '0') as int) + ((fields['errors'] ?: '0') as int)
+                def desc = "Tests: ${fields['tests'] ?: '?'} (NG=${fails}, Skip=${fields['skipped'] ?: '?'}) / LineCov: ${fields['line_coverage'] ?: 'N/A'}"
+                currentBuild.description = (currentBuild.description ? "${currentBuild.description} | ${desc}" : desc)
+            }
+        } catch (descErr) {
+            echo "currentBuild.description 更新に失敗: ${descErr.message}"
+        }
+    }
 }
