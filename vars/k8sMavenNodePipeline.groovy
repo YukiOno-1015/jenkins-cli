@@ -764,10 +764,32 @@ echo "TEST_COVERAGE_SUMMARY tests=$sf_tests passed=$passed failures=$sf_failures
         // --- Jenkins UI: Coverage Plugin ---
         if (enableCoverage) {
             try {
-                recordCoverage(
+                // jacoco.xml の配置からモジュール単位の src/main/java を逆算する。
+                // 例: repo/module-a/target/site/jacoco/jacoco.xml -> repo/module-a/src/main/java
+                // Source 解決先を明示しないと、Coverage Plugin が workspace 直下の
+                // src/main/java 固定で探索し、マルチモジュール構成で not found が多発する。
+                def coverageSourceDirectories = findFiles(glob: coveragePattern)
+                    .findAll { !it.directory }
+                    .collect { it.path.replaceAll('/target/site/jacoco/jacoco\\.xml$', '/src/main/java') }
+                    .findAll { sourceDir -> fileExists(sourceDir) }
+                    .unique()
+                    .sort()
+
+                if (coverageSourceDirectories) {
+                    echo "Coverage ソース探索ディレクトリを明示します: ${coverageSourceDirectories.join(', ')}"
+                } else {
+                    echo "⚠️ Coverage ソース探索ディレクトリを解決できませんでした。coveragePattern=${coveragePattern}"
+                }
+
+                def recordCoverageArgs = [
                     tools: [[parser: 'JACOCO', pattern: coveragePattern]],
                     sourceCodeRetention: 'EVERY_BUILD'
-                )
+                ]
+                if (coverageSourceDirectories) {
+                    recordCoverageArgs.sourceDirectories = coverageSourceDirectories.collect { [path: it] }
+                }
+
+                recordCoverage(recordCoverageArgs)
             } catch (recErr) {
                 echo "recordCoverage 呼び出しに失敗: ${recErr.message}（Coverage Plugin が未導入の可能性。コンソールの Markdown 表で代替確認してください）"
             }
