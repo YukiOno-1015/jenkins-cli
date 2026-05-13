@@ -40,10 +40,10 @@ spec:
         }
     }
     parameters {
-        string(name: 'CUSTOM_LOCAL_PART',   defaultValue: '', description: '追加するカスタムアドレスのローカル部（@より前。例: umi）')
+        string(name: 'CUSTOM_LOCAL_PART',   defaultValue: '', description: '追加するカスタムアドレスのローカル部（@より前。カンマ区切りで複数指定可。例: umi,eri,kotori）')
         string(name: 'CUSTOM_DOMAIN',       defaultValue: '', description: 'カスタムアドレスの FQDN。空欄なら mail.sk4869.info を使用')
         string(name: 'DESTINATION_ADDRESS', defaultValue: '', description: '転送先メールアドレス。空欄なら sk4869pw4869@gmail.com を使用。未登録ならアカウントへ登録要求も実施')
-        string(name: 'RULE_NAME',           defaultValue: '', description: 'ルール名。空欄なら "forward <custom> -> <destination>" を自動採番')
+        string(name: 'RULE_NAME',           defaultValue: '', description: 'ルール名。空欄なら "forward <custom> -> <destination>" を自動採番。カスタム複数指定時は空欄必須')
         booleanParam(name: 'RULE_ENABLED',  defaultValue: true, description: '作成するルールを有効化するか')
         booleanParam(name: 'SEND_TEST_MAIL', defaultValue: true, description: '登録成功後にカスタムアドレスへテストメールを送信する')
         string(name: 'TEST_MAIL_FROM', defaultValue: '', description: 'テストメールの From アドレス。空欄なら Jenkins System の SMTP デフォルト送信者を使用。Gmail 等は同一アカウント間のメールを重複排除するため、転送先と異なるアドレスを推奨')
@@ -56,6 +56,8 @@ spec:
 
     environment {
         CF_API_BASE = 'https://api.cloudflare.com/client/v4'
+        // API 書き込み呼び出し間に挿入する待機ミリ秒（Cloudflare API レート制限保護）
+        API_THROTTLE_MS = '500'
     }
 
     stages {
@@ -63,35 +65,56 @@ spec:
         stage('Validate Parameters') {
             steps {
                 script {
-                    def local  = (params.CUSTOM_LOCAL_PART ?: '').trim()
-                    def domain = (params.CUSTOM_DOMAIN ?: '').trim() ?: 'mail.sk4869.info'
-                    def dest   = (params.DESTINATION_ADDRESS ?: '').trim() ?: 'sk4869pw4869@gmail.com'
-                    def emailRe  = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-                    def domainRe = /^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)+$/
+                    def rawLocals = (params.CUSTOM_LOCAL_PART ?: '').trim()
+                    def domain    = (params.CUSTOM_DOMAIN ?: '').trim() ?: 'mail.sk4869.info'
+                    def dest      = (params.DESTINATION_ADDRESS ?: '').trim() ?: 'sk4869pw4869@gmail.com'
+                    def explicitRuleName = (params.RULE_NAME ?: '').trim()
+                    def emailRe   = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+                    def domainRe  = /^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)+$/
+                    def localRe   = /^[A-Za-z0-9._%+-]+$/
 
-                    if (!local) {
-                        error('CUSTOM_LOCAL_PART を指定してください（例: umi）')
-                    }
-                    if (local.contains('@')) {
-                        error("CUSTOM_LOCAL_PART に '@' を含めないでください: '${local}'")
+                    if (!rawLocals) {
+                        error('CUSTOM_LOCAL_PART を指定してください（例: umi、または umi,eri,kotori）')
                     }
                     if (!(domain ==~ domainRe)) {
                         error("CUSTOM_DOMAIN が不正です: '${domain}'")
-                    }
-                    def custom = "${local}@${domain}"
-                    if (!(custom ==~ emailRe)) {
-                        error("組み立てたカスタムアドレスが不正です: '${custom}'")
                     }
                     if (!(dest ==~ emailRe)) {
                         error("DESTINATION_ADDRESS が不正です: '${dest}'")
                     }
 
-                    env.CUSTOM_ADDR = custom
-                    env.DEST_ADDR   = dest
-                    env.RULE_NAME_EFFECTIVE = (params.RULE_NAME ?: '').trim() ?: "forward ${custom} -> ${dest}"
-                    echo "カスタムアドレス : ${env.CUSTOM_ADDR}"
+                    // カンマ区切りパース + 重複排除（順序保持）
+                    def localParts = rawLocals.split(',').collect { it.trim() }.findAll { it }
+                    def seen = [:]
+                    def uniqLocals = []
+                    for (p in localParts) {
+                        if (!(p ==~ localRe)) {
+                            error("CUSTOM_LOCAL_PART に不正な値が含まれます: '${p}'")
+                        }
+                        if (!seen.containsKey(p)) {
+                            seen[p] = true
+                            uniqLocals << p
+                        }
+                    }
+                    def customs = uniqLocals.collect { "${it}@${domain}".toString() }
+                    customs.each { c ->
+                        if (!(c ==~ emailRe)) {
+                            error("組み立てたカスタムアドレスが不正です: '${c}'")
+                        }
+                    }
+                    if (customs.size() > 1 && explicitRuleName) {
+                        error('RULE_NAME はカスタムアドレスが 1 件のときのみ指定できます。複数指定時は空欄にしてください。')
+                    }
+
+                    env.CUSTOM_ADDRS = customs.join(',')
+                    env.DEST_ADDR    = dest
+                    env.EXPLICIT_RULE_NAME = explicitRuleName
+                    echo "カスタムアドレス (${customs.size()} 件):"
+                    customs.eachWithIndex { c, i -> echo "  [${i + 1}] ${c}" }
                     echo "転送先          : ${env.DEST_ADDR}"
-                    echo "ルール名        : ${env.RULE_NAME_EFFECTIVE}"
+                    if (explicitRuleName) {
+                        echo "ルール名        : ${explicitRuleName}"
+                    }
                 }
             }
         }
@@ -124,10 +147,15 @@ spec:
                         }
                         echo "使用 Account ID: ${env.CF_ACCOUNT_ID}"
 
-                        // カスタムアドレスのドメインが Zone と一致するかチェック（誤ゾーン保護）
-                        def customDomain = env.CUSTOM_ADDR.split('@', 2)[1]
-                        if (zoneName && !(customDomain == zoneName || customDomain.endsWith('.' + zoneName))) {
-                            error("カスタムアドレスのドメイン '${customDomain}' が Zone '${zoneName}' に属していません。")
+                        // 各カスタムアドレスのドメインが Zone と一致するかチェック（誤ゾーン保護）
+                        if (zoneName) {
+                            def customs = env.CUSTOM_ADDRS.tokenize(',')
+                            for (def c in customs) {
+                                def customDomain = c.split('@', 2)[1]
+                                if (!(customDomain == zoneName || customDomain.endsWith('.' + zoneName))) {
+                                    error("カスタムアドレスのドメイン '${customDomain}' が Zone '${zoneName}' に属していません。")
+                                }
+                            }
                         }
                     }
                 }
@@ -173,58 +201,76 @@ spec:
             steps {
                 script {
                     withCloudflareCredentials {
-                        echo '=== 既存ルール検索 ==='
+                        echo '=== 既存ルール一括取得 ==='
                         def listRes = cfGetByPath('/zones/$CF_ZONE_ID/email/routing/rules?per_page=50')
                         if (listRes.code != 200) {
                             error("ルール一覧の取得に失敗しました: HTTP ${listRes.code}\n${listRes.raw}")
                         }
                         def rules = listRes.body.result ?: []
-                        def existing = rules.find { rule ->
-                            (rule.matchers ?: []).any { m ->
-                                m.type == 'literal' && m.field == 'to' && m.value == env.CUSTOM_ADDR
+                        echo "既存ルール: ${rules.size()} 件"
+
+                        def throttleMs = (env.API_THROTTLE_MS ?: '500').toInteger()
+                        def customs = env.CUSTOM_ADDRS.tokenize(',')
+                        int created = 0, updated = 0, skipped = 0
+
+                        for (def i = 0; i < customs.size(); i++) {
+                            def custom = customs[i]
+                            def ruleName = env.EXPLICIT_RULE_NAME ?: "forward ${custom} -> ${env.DEST_ADDR}"
+                            def desiredBody = [
+                                name    : ruleName,
+                                enabled : params.RULE_ENABLED,
+                                matchers: [[type: 'literal', field: 'to', value: custom]],
+                                actions : [[type: 'forward', value: [env.DEST_ADDR]]],
+                            ]
+                            def existing = rules.find { rule ->
+                                (rule.matchers ?: []).any { m ->
+                                    m.type == 'literal' && m.field == 'to' && m.value == custom
+                                }
+                            }
+
+                            echo "--- [${i + 1}/${customs.size()}] ${custom} ---"
+                            if (existing) {
+                                def currentDest = existing.actions?.getAt(0)?.value ?: []
+                                def needsUpdate = (
+                                    existing.name != desiredBody.name ||
+                                    existing.enabled != desiredBody.enabled ||
+                                    currentDest != [env.DEST_ADDR]
+                                )
+                                if (!needsUpdate) {
+                                    echo "ルールは最新です（更新不要）: ${existing.tag}"
+                                    skipped++
+                                    continue
+                                }
+                                echo "既存ルールを更新: ${existing.tag}"
+                                def updRes = cfPutByPath(
+                                    "/zones/\$CF_ZONE_ID/email/routing/rules/${existing.tag}",
+                                    desiredBody
+                                )
+                                if (updRes.code != 200) {
+                                    def errMsg = updRes.body?.errors?.getAt(0)?.message ?: "HTTP ${updRes.code}"
+                                    error("ルール更新に失敗しました (${custom}): ${errMsg}\n${updRes.raw}")
+                                }
+                                updated++
+                            } else {
+                                echo 'ルールを新規作成'
+                                def createRes = cfPostByPath(
+                                    '/zones/$CF_ZONE_ID/email/routing/rules',
+                                    desiredBody
+                                )
+                                if (createRes.code != 200) {
+                                    def errMsg = createRes.body?.errors?.getAt(0)?.message ?: "HTTP ${createRes.code}"
+                                    error("ルール作成に失敗しました (${custom}): ${errMsg}\n${createRes.raw}")
+                                }
+                                echo "tag=${createRes.body.result?.tag}"
+                                created++
+                            }
+
+                            // API レート制限対策: 次の書き込みまで短時間スリープ
+                            if (i < customs.size() - 1 && throttleMs > 0) {
+                                sleep time: throttleMs, unit: 'MILLISECONDS'
                             }
                         }
-
-                        def desiredBody = [
-                            name    : env.RULE_NAME_EFFECTIVE,
-                            enabled : params.RULE_ENABLED,
-                            matchers: [[type: 'literal', field: 'to', value: env.CUSTOM_ADDR]],
-                            actions : [[type: 'forward', value: [env.DEST_ADDR]]],
-                        ]
-
-                        if (existing) {
-                            def currentDest = existing.actions?.getAt(0)?.value ?: []
-                            def needsUpdate = (
-                                existing.name != desiredBody.name ||
-                                existing.enabled != desiredBody.enabled ||
-                                currentDest != [env.DEST_ADDR]
-                            )
-                            if (!needsUpdate) {
-                                echo "ルールは最新です（更新不要）: ${existing.tag}"
-                                return
-                            }
-                            echo "=== 既存ルールを更新: ${existing.tag} ==="
-                            def updRes = cfPutByPath(
-                                "/zones/\$CF_ZONE_ID/email/routing/rules/${existing.tag}",
-                                desiredBody
-                            )
-                            if (updRes.code != 200) {
-                                def errMsg = updRes.body?.errors?.getAt(0)?.message ?: "HTTP ${updRes.code}"
-                                error("ルール更新に失敗しました: ${errMsg}\n${updRes.raw}")
-                            }
-                            echo "ルールを更新しました: ${existing.tag}"
-                        } else {
-                            echo '=== ルールを新規作成 ==='
-                            def createRes = cfPostByPath(
-                                '/zones/$CF_ZONE_ID/email/routing/rules',
-                                desiredBody
-                            )
-                            if (createRes.code != 200) {
-                                def errMsg = createRes.body?.errors?.getAt(0)?.message ?: "HTTP ${createRes.code}"
-                                error("ルール作成に失敗しました: ${errMsg}\n${createRes.raw}")
-                            }
-                            echo "ルールを作成しました: tag=${createRes.body.result?.tag}"
-                        }
+                        echo "ルール処理完了: 作成=${created}, 更新=${updated}, スキップ=${skipped}"
                     }
                 }
             }
@@ -242,23 +288,31 @@ spec:
                         echo "警告: TEST_MAIL_FROM 未指定。Jenkins SMTP のデフォルト送信者が転送先 (${env.DEST_ADDR}) と同一の場合、Gmail 等の重複排除でメールが届かない可能性があります。"
                     }
 
-                    def subject = "[Cloudflare Email Routing] テスト送信 #${env.BUILD_NUMBER}"
-                    def body = """\
+                    def throttleMs = (env.API_THROTTLE_MS ?: '500').toInteger()
+                    def customs = env.CUSTOM_ADDRS.tokenize(',')
+                    for (def i = 0; i < customs.size(); i++) {
+                        def custom = customs[i]
+                        def subject = "[Cloudflare Email Routing] テスト送信 #${env.BUILD_NUMBER} (${custom})"
+                        def body = """\
 このメールは Jenkins ジョブ '${env.JOB_NAME}' #${env.BUILD_NUMBER} から送信した
 Cloudflare Email Routing の疎通テストです。
 
-カスタムアドレス : ${env.CUSTOM_ADDR}
+カスタムアドレス : ${custom}
 転送先          : ${env.DEST_ADDR}
 ビルド URL      : ${env.BUILD_URL}
 
 このメールが転送先 (${env.DEST_ADDR}) で受信できれば Email Routing は正常に動作しています。
 """.stripIndent()
-                    if (fromAddr) {
-                        mail to: env.CUSTOM_ADDR, from: fromAddr, subject: subject, body: body
-                        echo "テストメール送信完了: from=${fromAddr}, to=${env.CUSTOM_ADDR}"
-                    } else {
-                        mail to: env.CUSTOM_ADDR, subject: subject, body: body
-                        echo "テストメール送信完了: to=${env.CUSTOM_ADDR}（From は Jenkins デフォルト）"
+                        if (fromAddr) {
+                            mail to: custom, from: fromAddr, subject: subject, body: body
+                            echo "[${i + 1}/${customs.size()}] テストメール送信: from=${fromAddr}, to=${custom}"
+                        } else {
+                            mail to: custom, subject: subject, body: body
+                            echo "[${i + 1}/${customs.size()}] テストメール送信: to=${custom}（From は Jenkins デフォルト）"
+                        }
+                        if (i < customs.size() - 1 && throttleMs > 0) {
+                            sleep time: throttleMs, unit: 'MILLISECONDS'
+                        }
                     }
                     if (env.DEST_NEWLY_CREATED == 'true') {
                         echo "注意: 転送先 ${env.DEST_ADDR} は未検証の可能性があるため、検証メール認証後に再送が必要なことがあります。"
@@ -270,8 +324,10 @@ Cloudflare Email Routing の疎通テストです。
 
     post {
         success {
-            echo "Email Routing 設定完了: ${env.CUSTOM_ADDR} → ${env.DEST_ADDR}"
             script {
+                def customs = (env.CUSTOM_ADDRS ?: '').tokenize(',')
+                echo "Email Routing 設定完了: ${customs.size()} 件 → ${env.DEST_ADDR}"
+                customs.eachWithIndex { c, i -> echo "  [${i + 1}] ${c}" }
                 if (env.DEST_NEWLY_CREATED == 'true') {
                     echo "注意: 転送先 ${env.DEST_ADDR} は新規登録のため、受信ボックスで確認メールの認証を完了してください。"
                 }
