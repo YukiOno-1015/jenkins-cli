@@ -45,6 +45,7 @@ spec:
         string(name: 'RULE_NAME',           defaultValue: '', description: 'ルール名。空欄なら "forward <custom> -> <destination>" を自動採番')
         booleanParam(name: 'RULE_ENABLED',  defaultValue: true, description: '作成するルールを有効化するか')
         booleanParam(name: 'SEND_TEST_MAIL', defaultValue: true, description: '登録成功後にカスタムアドレスへテストメールを送信する')
+        string(name: 'TEST_MAIL_FROM', defaultValue: '', description: 'テストメールの From アドレス。空欄なら Jenkins System の SMTP デフォルト送信者を使用。Gmail 等は同一アカウント間のメールを重複排除するため、転送先と異なるアドレスを推奨')
     }
     options {
         skipDefaultCheckout(true)
@@ -220,6 +221,14 @@ spec:
             when { expression { return params.SEND_TEST_MAIL } }
             steps {
                 script {
+                    def fromAddr = (params.TEST_MAIL_FROM ?: '').trim()
+                    if (fromAddr && fromAddr.equalsIgnoreCase(env.DEST_ADDR)) {
+                        error("TEST_MAIL_FROM (${fromAddr}) と DESTINATION_ADDRESS (${env.DEST_ADDR}) が同一です。Gmail 等の重複排除で届かない可能性があるため、別アドレスを指定してください。")
+                    }
+                    if (!fromAddr) {
+                        echo "警告: TEST_MAIL_FROM 未指定。Jenkins SMTP のデフォルト送信者が転送先 (${env.DEST_ADDR}) と同一の場合、Gmail 等の重複排除でメールが届かない可能性があります。"
+                    }
+
                     def subject = "[Cloudflare Email Routing] テスト送信 #${env.BUILD_NUMBER}"
                     def body = """\
 このメールは Jenkins ジョブ '${env.JOB_NAME}' #${env.BUILD_NUMBER} から送信した
@@ -231,8 +240,13 @@ Cloudflare Email Routing の疎通テストです。
 
 このメールが転送先 (${env.DEST_ADDR}) で受信できれば Email Routing は正常に動作しています。
 """.stripIndent()
-                    mail to: env.CUSTOM_ADDR, subject: subject, body: body
-                    echo "テストメール送信完了: to=${env.CUSTOM_ADDR}"
+                    if (fromAddr) {
+                        mail to: env.CUSTOM_ADDR, from: fromAddr, subject: subject, body: body
+                        echo "テストメール送信完了: from=${fromAddr}, to=${env.CUSTOM_ADDR}"
+                    } else {
+                        mail to: env.CUSTOM_ADDR, subject: subject, body: body
+                        echo "テストメール送信完了: to=${env.CUSTOM_ADDR}（From は Jenkins デフォルト）"
+                    }
                     if (env.DEST_NEWLY_CREATED == 'true') {
                         echo "注意: 転送先 ${env.DEST_ADDR} は未検証の可能性があるため、検証メール認証後に再送が必要なことがあります。"
                     }
