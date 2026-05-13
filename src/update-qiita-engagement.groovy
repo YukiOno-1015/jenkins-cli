@@ -115,7 +115,7 @@ spec:
 
         string(
             name: 'MAX_STATE_IDS',
-            defaultValue: '5000',
+            defaultValue: '30000',
             description: 'state に保持する最大記事ID件数'
         )
 
@@ -192,7 +192,7 @@ spec:
                         error('QIITA_TOKEN_CREDENTIAL_IDS / QIITA_TOKEN_CREDENTIAL_ID が空です。')
                     }
 
-                    int maxStateIds   = qiitaEngagementUtils.toBoundedInt(params.MAX_STATE_IDS, 5000, 100, 50000)
+                    int maxStateIds   = qiitaEngagementUtils.toBoundedInt(params.MAX_STATE_IDS, 30000, 100, 50000)
                     int httpTimeout   = qiitaEngagementUtils.toBoundedInt(params.HTTP_TIMEOUT_SEC, 30, 5, 300)
                     int httpRetry     = qiitaEngagementUtils.toBoundedInt(params.HTTP_RETRY_COUNT, 3, 1, 10)
 

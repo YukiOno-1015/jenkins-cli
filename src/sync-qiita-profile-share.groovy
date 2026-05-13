@@ -74,7 +74,7 @@ spec:
 
         string(
             name: 'MAX_PAGE_COUNT',
-            defaultValue: '20',
+            defaultValue: '100',
             description: 'Qiita API の最大ページ取得数（1ページ=100件）'
         )
 
@@ -124,7 +124,7 @@ spec:
                         credentialIds : credentialIds,
                         httpTimeoutSec: qiitaEngagementUtils.toBoundedInt(params.HTTP_TIMEOUT_SEC, 30, 5, 300),
                         httpRetryCount: qiitaEngagementUtils.toBoundedInt(params.HTTP_RETRY_COUNT, 3, 1, 10),
-                        maxPageCount  : qiitaEngagementUtils.toBoundedInt(params.MAX_PAGE_COUNT, 20, 1, 200),
+                        maxPageCount  : qiitaEngagementUtils.toBoundedInt(params.MAX_PAGE_COUNT, 100, 1, 200),
                         dryRun        : params.DRY_RUN
                     ]
 
