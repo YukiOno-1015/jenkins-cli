@@ -68,11 +68,11 @@ spec:
     }
 
     /*
-     * 30分ごとに起動。
-     * H を使って負荷分散。
+     * 30分ごとに起動。H を使って負荷分散。
+     * 4 時台は sync-qiita-profile-share と被るので除外する。
      */
     triggers {
-        cron('TZ=Asia/Tokyo\nH/30 * * * *')
+        cron('TZ=Asia/Tokyo\nH/30 0-3,5-23 * * *')
     }
 
     options {
@@ -142,6 +142,12 @@ spec:
             defaultValue: '3',
             description: '429 / 5xx / ネットワークエラー時のリトライ回数'
         )
+
+        string(
+            name: 'API_THROTTLE_MS',
+            defaultValue: '1500',
+            description: '各書き込み API（like/stock）の間に挿入する待機ミリ秒。Qiita の spam 検知回避'
+        )
     }
 
     environment {
@@ -195,6 +201,7 @@ spec:
                     int maxStateIds   = qiitaEngagementUtils.toBoundedInt(params.MAX_STATE_IDS, 30000, 100, 50000)
                     int httpTimeout   = qiitaEngagementUtils.toBoundedInt(params.HTTP_TIMEOUT_SEC, 30, 5, 300)
                     int httpRetry     = qiitaEngagementUtils.toBoundedInt(params.HTTP_RETRY_COUNT, 3, 1, 10)
+                    int apiThrottleMs = qiitaEngagementUtils.toBoundedInt(params.API_THROTTLE_MS, 1500, 0, 30000)
 
                     def stateFilePath = (params.STATE_FILE_PATH ?: '').trim()
                     if (!stateFilePath) {
@@ -216,7 +223,8 @@ spec:
                         stateDir      : stateDirPath,
                         maxStateIds   : maxStateIds,
                         httpTimeoutSec: httpTimeout,
-                        httpRetryCount: httpRetry
+                        httpRetryCount: httpRetry,
+                        apiThrottleMs : apiThrottleMs
                     ]
 
                     echo "対象 Organization    : ${qiitaConfig.organizations.join(', ')}"
@@ -225,6 +233,7 @@ spec:
                     echo "State 最大件数  : ${qiitaConfig.maxStateIds}"
                     echo "HTTP タイムアウト: ${qiitaConfig.httpTimeoutSec}s"
                     echo "HTTP リトライ回数: ${qiitaConfig.httpRetryCount}"
+                    echo "API スロットル  : ${qiitaConfig.apiThrottleMs}ms"
                     echo "Credential IDs : ${qiitaConfig.credentialIds.join(', ')}"
                 }
             }
@@ -401,6 +410,8 @@ spec:
                                             echo "[INFO] ストック実施済み state へ保存: ${stockStateKey}"
                                         }
                                     } else {
+                                        int throttleMs = qiitaConfig.apiThrottleMs ?: 0
+
                                         if (qiitaConfig.doLike && !likeAlreadyProcessed) {
                                             def likeRes = qiitaEngagementUtils.qiitaPut(qiitaConfig, env.QIITA_API_BASE, "/items/${target.id}/like")
                                             if (qiitaEngagementUtils.isSuccessCode(likeRes.code)) {
@@ -425,6 +436,10 @@ spec:
                                                 likeOk = false
                                                 echo "[WARN] いいね失敗: credentialId=${credentialId}, id=${target.id}, HTTP=${likeRes.code}, body=${qiitaEngagementUtils.trimForLog(likeRes.rawBody)}"
                                             }
+
+                                            if (throttleMs > 0) {
+                                                sleep time: throttleMs, unit: 'MILLISECONDS'
+                                            }
                                         }
 
                                         if (qiitaConfig.doStock && !stockAlreadyProcessed) {
@@ -447,6 +462,10 @@ spec:
                                             } else {
                                                 stockOk = false
                                                 echo "[WARN] ストック失敗: credentialId=${credentialId}, id=${target.id}, HTTP=${stockRes.code}, body=${qiitaEngagementUtils.trimForLog(stockRes.rawBody)}"
+                                            }
+
+                                            if (throttleMs > 0) {
+                                                sleep time: throttleMs, unit: 'MILLISECONDS'
                                             }
                                         }
                                     }

@@ -40,10 +40,11 @@ spec:
     }
 
     /*
-     * 定期実行: 毎日1回（3時台、分はHで分散）
+     * 定期実行: 毎日1回（4時台、分はHで分散）。
+     * 30分おきに走る update-qiita-engagement と被らない時間帯に置く。
      */
     triggers {
-        cron('TZ=Asia/Tokyo\nH 3 * * *')
+        cron('TZ=Asia/Tokyo\nH 4 * * *')
     }
 
     options {
@@ -76,6 +77,18 @@ spec:
             name: 'MAX_PAGE_COUNT',
             defaultValue: '100',
             description: 'Qiita API の最大ページ取得数（1ページ=100件）'
+        )
+
+        string(
+            name: 'API_THROTTLE_MS',
+            defaultValue: '2000',
+            description: '各書き込み API 呼び出しの間に挿入する待機ミリ秒。Qiita の spam 検知で silent drop を避けるために多めに取る'
+        )
+
+        string(
+            name: 'MAX_FOLLOWS_PER_RUN',
+            defaultValue: '30',
+            description: '1 run / 1 アカウントあたりのユーザーフォロー PUT 上限。0 で無制限。spam 判定回避のため複数日に分けて埋める用途'
         )
 
         booleanParam(
@@ -121,17 +134,21 @@ spec:
                     }
 
                     syncConfig = [
-                        credentialIds : credentialIds,
-                        httpTimeoutSec: qiitaEngagementUtils.toBoundedInt(params.HTTP_TIMEOUT_SEC, 30, 5, 300),
-                        httpRetryCount: qiitaEngagementUtils.toBoundedInt(params.HTTP_RETRY_COUNT, 3, 1, 10),
-                        maxPageCount  : qiitaEngagementUtils.toBoundedInt(params.MAX_PAGE_COUNT, 100, 1, 200),
-                        dryRun        : params.DRY_RUN
+                        credentialIds    : credentialIds,
+                        httpTimeoutSec   : qiitaEngagementUtils.toBoundedInt(params.HTTP_TIMEOUT_SEC, 30, 5, 300),
+                        httpRetryCount   : qiitaEngagementUtils.toBoundedInt(params.HTTP_RETRY_COUNT, 3, 1, 10),
+                        maxPageCount     : qiitaEngagementUtils.toBoundedInt(params.MAX_PAGE_COUNT, 100, 1, 200),
+                        apiThrottleMs    : qiitaEngagementUtils.toBoundedInt(params.API_THROTTLE_MS, 2000, 0, 30000),
+                        maxFollowsPerRun : qiitaEngagementUtils.toBoundedInt(params.MAX_FOLLOWS_PER_RUN, 30, 0, 10000),
+                        dryRun           : params.DRY_RUN
                     ]
 
                     echo "対象 Credential IDs: ${syncConfig.credentialIds.join(', ')}"
                     echo "HTTP タイムアウト: ${syncConfig.httpTimeoutSec}s"
                     echo "HTTP リトライ回数: ${syncConfig.httpRetryCount}"
                     echo "最大ページ数: ${syncConfig.maxPageCount}"
+                    echo "API スロットル: ${syncConfig.apiThrottleMs}ms"
+                    echo "1 run のフォロー上限/アカウント: ${syncConfig.maxFollowsPerRun == 0 ? '無制限' : syncConfig.maxFollowsPerRun}"
                     echo "DRY_RUN: ${syncConfig.dryRun}"
                 }
             }
@@ -206,6 +223,9 @@ spec:
                     int appliedTagFollows = 0
                     int skipped = 0
                     int failures = 0
+                    int throttleMs = syncConfig.apiThrottleMs ?: 0
+                    int maxFollowsPerRun = syncConfig.maxFollowsPerRun ?: 0
+                    int deferredFollows = 0
 
                     for (def account : syncConfig.activeAccounts) {
                         def credentialId = account.credentialId
@@ -213,10 +233,20 @@ spec:
                         def ownFolloweeIds = (account.followeeIds ?: []) as Set
                         def ownTagIds = (account.tagIds ?: []) as Set
 
-                        def missingFollowees = (syncConfig.unionFollowees as Set) - ownFolloweeIds - ([selfUserId] as Set)
+                        def missingFollowees = ((syncConfig.unionFollowees as Set) - ownFolloweeIds - ([selfUserId] as Set)) as List
+
+                        // 1 run / 1 アカウントあたりの follow 上限。Qiita の spam 判定回避目的。
+                        // 上限を超えた分は次回 run に持ち越す（冪等なので自然に解決）。
+                        def followeesToProcess = missingFollowees
+                        int deferredThisAccount = 0
+                        if (maxFollowsPerRun > 0 && missingFollowees.size() > maxFollowsPerRun) {
+                            followeesToProcess = missingFollowees.take(maxFollowsPerRun)
+                            deferredThisAccount = missingFollowees.size() - maxFollowsPerRun
+                            deferredFollows += deferredThisAccount
+                        }
                         def missingTags = (syncConfig.unionTags as Set) - ownTagIds
 
-                        echo "同期対象: credentialId=${credentialId}, userId=${selfUserId}, 追加予定 followees=${missingFollowees.size()}, tags=${missingTags.size()}"
+                        echo "同期対象: credentialId=${credentialId}, userId=${selfUserId}, 追加予定 followees=${followeesToProcess.size()}/${missingFollowees.size()}, tags=${missingTags.size()}" + (deferredThisAccount > 0 ? " (次回持ち越し=${deferredThisAccount})" : '')
 
                         withCredentials([string(credentialsId: credentialId, variable: 'QIITA_TOKEN')]) {
                             def cfg = [
@@ -224,7 +254,7 @@ spec:
                                 httpRetryCount: syncConfig.httpRetryCount
                             ]
 
-                            for (String targetUserId : missingFollowees) {
+                            for (String targetUserId : followeesToProcess) {
                                 if (syncConfig.dryRun) {
                                     echo "[DRY_RUN] ユーザーフォロー追加予定: credentialId=${credentialId}, targetUser=${targetUserId}"
                                     skipped++
@@ -241,6 +271,10 @@ spec:
                                 } else {
                                     failures++
                                     echo "[WARN] ユーザーフォロー反映失敗: credentialId=${credentialId}, targetUser=${targetUserId}, HTTP=${res.code}, path=${res.path}, body=${qiitaEngagementUtils.trimForLog(res.rawBody)}"
+                                }
+
+                                if (throttleMs > 0) {
+                                    sleep time: throttleMs, unit: 'MILLISECONDS'
                                 }
                             }
 
@@ -264,6 +298,10 @@ spec:
                                     failures++
                                     echo "[WARN] タグフォロー反映失敗: credentialId=${credentialId}, tag=${tagId}, HTTP=${res.code}, path=${res.path}, body=${qiitaEngagementUtils.trimForLog(res.rawBody)}"
                                 }
+
+                                if (throttleMs > 0) {
+                                    sleep time: throttleMs, unit: 'MILLISECONDS'
+                                }
                             }
                         }
                     }
@@ -271,12 +309,56 @@ spec:
                     echo '同期結果:'
                     echo "  ユーザーフォロー反映数 = ${appliedUserFollows}"
                     echo "  タグフォロー反映数   = ${appliedTagFollows}"
+                    echo "  次回持ち越し       = ${deferredFollows}"
                     echo "  DRY_RUNスキップ数    = ${skipped}"
                     echo "  失敗数              = ${failures}"
 
                     if (failures > 0) {
                         currentBuild.result = 'UNSTABLE'
                         echo '[WARN] 一部反映に失敗したため、ビルド結果を UNSTABLE に設定します。'
+                    }
+                }
+            }
+        }
+
+        stage('Verify Sync Results') {
+            when { expression { return !syncConfig.dryRun } }
+            steps {
+                script {
+                    // 書き込み直後に followees を再取得し、union との差分（＝Qiita 側で
+                    // silent drop されている可能性のある follow 件数）を可視化する。
+                    // ここでは自動再試行は行わない。冪等構造のため次回 run で自然に拾い直す。
+                    def unionSet = (syncConfig.unionFollowees ?: []) as Set
+                    int totalGap = 0
+
+                    for (def account : syncConfig.activeAccounts) {
+                        def credentialId = account.credentialId
+                        def selfUserId = account.userId
+
+                        withCredentials([string(credentialsId: credentialId, variable: 'QIITA_TOKEN')]) {
+                            def cfg = [
+                                httpTimeoutSec: syncConfig.httpTimeoutSec,
+                                httpRetryCount: syncConfig.httpRetryCount
+                            ]
+                            def latestFollowees = collectPaged(cfg, "/users/${selfUserId}/followees", syncConfig.maxPageCount)
+                            def latestIds = latestFollowees.collect { (it?.id ?: '').toString().trim() }.findAll { it } as Set
+                            def gap = (unionSet - latestIds - ([selfUserId] as Set))
+                            totalGap += gap.size()
+
+                            if (gap.isEmpty()) {
+                                echo "検証 OK: credentialId=${credentialId}, userId=${selfUserId}, followees=${latestIds.size()} (union=${unionSet.size()})"
+                            } else {
+                                def sample = gap.take(10).join(', ')
+                                def suffix = gap.size() > 10 ? ' …他' : ''
+                                echo "[WARN] 同期検証で差分検出: credentialId=${credentialId}, userId=${selfUserId}, followees=${latestIds.size()}, gap=${gap.size()} (例: ${sample}${suffix})"
+                            }
+                        }
+                    }
+
+                    if (totalGap > 0) {
+                        echo "未反映 follow 総数: ${totalGap}（次回 run で再試行されます）"
+                    } else {
+                        echo '全アカウントで follow が union と一致しました。'
                     }
                 }
             }
