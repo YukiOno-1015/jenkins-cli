@@ -6,9 +6,8 @@ import groovy.transform.Field
  * ============================================================
  *
  * 目的:
- * - 複数 Qiita アカウントの「フォロー中ユーザー」「フォロー中タグ」
- *   「フォロー中 Organization」を収集し、各アカウントへ相互反映する
- *   （A/B/C の差分を埋める）。
+ * - 複数 Qiita アカウントの「フォロー中ユーザー」「フォロー中タグ」を収集し、
+ *   各アカウントへ相互反映する（A/B/C の差分を埋める）。
  * - さらに、本パイプラインに登録されたアカウント同士を相互フォローさせる。
  *   （A/B/C を登録 → B/C が A を、A/C が B を、A/B が C をフォロー。トークン
  *    ユーザーが増えれば対象も自動拡張）
@@ -161,22 +160,15 @@ spec:
                                     } else {
                                         def followees = collectPaged(cfg, "/users/${userId}/followees", syncConfig.maxPageCount)
                                         def followingTags = collectPaged(cfg, "/users/${userId}/following_tags", syncConfig.maxPageCount)
-                                        // Organization のフォロー一覧 API はエンドポイント名が公式ドキュメントに
-                                        // 明示されていないため、候補を順に試す
-                                        def followingOrgsRes = collectPagedWithFallback(cfg, [
-                                            "/users/${userId}/following_organizations",
-                                            "/users/${userId}/following/organizations"
-                                        ], syncConfig.maxPageCount)
 
                                         activeAccounts << [
                                             credentialId : credentialId,
                                             userId       : userId,
                                             followeeIds  : followees.collect { (it?.id ?: '').toString().trim() }.findAll { it }.unique(),
-                                            tagIds       : followingTags.collect { (it?.id ?: '').toString().trim() }.findAll { it }.unique(),
-                                            orgUrlNames  : followingOrgsRes.items.collect { (it?.url_name ?: it?.id ?: '').toString().trim() }.findAll { it }.unique()
+                                            tagIds       : followingTags.collect { (it?.id ?: '').toString().trim() }.findAll { it }.unique()
                                         ]
 
-                                        echo "収集完了: credentialId=${credentialId}, userId=${userId}, followees=${followees.size()}, tags=${followingTags.size()}, orgs=${followingOrgsRes.items.size()} (path=${followingOrgsRes.path ?: 'N/A'})"
+                                        echo "収集完了: credentialId=${credentialId}, userId=${userId}, followees=${followees.size()}, tags=${followingTags.size()}"
                                     }
                                 }
                             }
@@ -196,15 +188,13 @@ spec:
                     def memberUserIds = activeAccounts.collect { it.userId }.findAll { it }.unique()
                     def unionFollowees = (activeAccounts.collectMany { it.followeeIds ?: [] } + memberUserIds).findAll { it }.unique()
                     def unionTags = activeAccounts.collectMany { it.tagIds ?: [] }.findAll { it }.unique()
-                    def unionOrgs = activeAccounts.collectMany { it.orgUrlNames ?: [] }.findAll { it }.unique()
 
                     syncConfig.activeAccounts = activeAccounts
                     syncConfig.memberUserIds = memberUserIds
                     syncConfig.unionFollowees = unionFollowees
                     syncConfig.unionTags = unionTags
-                    syncConfig.unionOrgs = unionOrgs
 
-                    echo "収集サマリ: accounts=${activeAccounts.size()}, members=${memberUserIds.size()} (${memberUserIds.join(', ')}), unionFollowees=${unionFollowees.size()}, unionTags=${unionTags.size()}, unionOrgs=${unionOrgs.size()}"
+                    echo "収集サマリ: accounts=${activeAccounts.size()}, members=${memberUserIds.size()} (${memberUserIds.join(', ')}), unionFollowees=${unionFollowees.size()}, unionTags=${unionTags.size()}"
                 }
             }
         }
@@ -214,7 +204,6 @@ spec:
                 script {
                     int appliedUserFollows = 0
                     int appliedTagFollows = 0
-                    int appliedOrgFollows = 0
                     int skipped = 0
                     int failures = 0
 
@@ -223,13 +212,11 @@ spec:
                         def selfUserId = account.userId
                         def ownFolloweeIds = (account.followeeIds ?: []) as Set
                         def ownTagIds = (account.tagIds ?: []) as Set
-                        def ownOrgUrlNames = (account.orgUrlNames ?: []) as Set
 
                         def missingFollowees = (syncConfig.unionFollowees as Set) - ownFolloweeIds - ([selfUserId] as Set)
                         def missingTags = (syncConfig.unionTags as Set) - ownTagIds
-                        def missingOrgs = (syncConfig.unionOrgs as Set) - ownOrgUrlNames
 
-                        echo "同期対象: credentialId=${credentialId}, userId=${selfUserId}, 追加予定 followees=${missingFollowees.size()}, tags=${missingTags.size()}, orgs=${missingOrgs.size()}"
+                        echo "同期対象: credentialId=${credentialId}, userId=${selfUserId}, 追加予定 followees=${missingFollowees.size()}, tags=${missingTags.size()}"
 
                         withCredentials([string(credentialsId: credentialId, variable: 'QIITA_TOKEN')]) {
                             def cfg = [
@@ -278,36 +265,14 @@ spec:
                                     echo "[WARN] タグフォロー反映失敗: credentialId=${credentialId}, tag=${tagId}, HTTP=${res.code}, path=${res.path}, body=${qiitaEngagementUtils.trimForLog(res.rawBody)}"
                                 }
                             }
-
-                            for (String orgUrlName : missingOrgs) {
-                                if (syncConfig.dryRun) {
-                                    echo "[DRY_RUN] Organization フォロー追加予定: credentialId=${credentialId}, org=${orgUrlName}"
-                                    skipped++
-                                    continue
-                                }
-
-                                def encodedOrg = URLEncoder.encode(orgUrlName, 'UTF-8')
-                                def res = qiitaPutWithFallback(cfg, [
-                                    "/organizations/${encodedOrg}/following",
-                                    "/organizations/${encodedOrg}/follow"
-                                ])
-
-                                if (qiitaEngagementUtils.isSuccessCode(res.code) || res.code == 409) {
-                                    appliedOrgFollows++
-                                } else {
-                                    failures++
-                                    echo "[WARN] Organization フォロー反映失敗: credentialId=${credentialId}, org=${orgUrlName}, HTTP=${res.code}, path=${res.path}, body=${qiitaEngagementUtils.trimForLog(res.rawBody)}"
-                                }
-                            }
                         }
                     }
 
                     echo '同期結果:'
-                    echo "  ユーザーフォロー反映数        = ${appliedUserFollows}"
-                    echo "  タグフォロー反映数          = ${appliedTagFollows}"
-                    echo "  Organization フォロー反映数 = ${appliedOrgFollows}"
-                    echo "  DRY_RUNスキップ数           = ${skipped}"
-                    echo "  失敗数                     = ${failures}"
+                    echo "  ユーザーフォロー反映数 = ${appliedUserFollows}"
+                    echo "  タグフォロー反映数   = ${appliedTagFollows}"
+                    echo "  DRY_RUNスキップ数    = ${skipped}"
+                    echo "  失敗数              = ${failures}"
 
                     if (failures > 0) {
                         currentBuild.result = 'UNSTABLE'
@@ -348,43 +313,6 @@ def qiitaPutWithFallback(Map cfg, List<String> apiPaths) {
     }
 
     return last
-}
-
-/*
- * 複数のエンドポイント候補を順に試し、最初に 200 が返ったパスから
- * ページング付きで配列を回収する。すべて 404 等で失敗した場合は
- * 空配列と path=null を返す（処理は継続させる用途）。
- */
-def collectPagedWithFallback(Map cfg, List<String> apiPaths, int maxPageCount) {
-    for (String apiPath : (apiPaths ?: [])) {
-        String sep = apiPath.contains('?') ? '&' : '?'
-        def res = qiitaEngagementUtils.qiitaGet(cfg, env.QIITA_API_BASE, "${apiPath}${sep}page=1&per_page=100")
-
-        if (res.code == 200 && res.body instanceof List) {
-            def all = []
-            all.addAll(res.body)
-
-            if (res.body.size() >= 100) {
-                for (int page = 2; page <= maxPageCount; page++) {
-                    def next = qiitaEngagementUtils.qiitaGet(cfg, env.QIITA_API_BASE, "${apiPath}${sep}page=${page}&per_page=100")
-                    if (next.code != 200 || !(next.body instanceof List) || next.body.isEmpty()) {
-                        break
-                    }
-                    all.addAll(next.body)
-                    if (next.body.size() < 100) {
-                        break
-                    }
-                }
-            }
-            return [path: apiPath, items: all]
-        }
-
-        if (res.code != 404) {
-            echo "[WARN] 一覧取得で予期しない応答: path=${apiPath}, HTTP=${res.code}"
-        }
-    }
-
-    return [path: null, items: []]
 }
 
 /*
