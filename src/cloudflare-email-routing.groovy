@@ -318,7 +318,9 @@ def withCloudflareCredentials(Closure body) {
     if (envToken && envZoneId) {
         echo 'Cloudflare 認証情報を環境変数から直接取得します。'
         def envs = ["CF_API_TOKEN=${envToken}", "CF_ZONE_ID=${envZoneId}"]
-        if (envAcctId) { envs << "CF_ACCOUNT_ID=${envAcctId}" } else { envs << 'CF_ACCOUNT_ID=' }
+        // CF_ACCOUNT_ID は未解決の可能性があるため、値が無い場合は withEnv で空マスクせず
+        // 後段（Verify ステージ）の env.CF_ACCOUNT_ID 解決結果をそのまま参照させる
+        if (envAcctId) { envs << "CF_ACCOUNT_ID=${envAcctId}" }
         withEnv(envs) {
             body.call()
         }
@@ -356,9 +358,9 @@ def withCloudflareCredentials(Closure body) {
                     }
                 }
                 if (!acctApplied) {
-                    withEnv(['CF_ACCOUNT_ID=']) {
-                        body.call()
-                    }
+                    // Account ID Credential が無いケース：env.CF_ACCOUNT_ID（Verify ステージで解決）を
+                    // そのまま使わせるため、空文字での withEnv マスクは行わない
+                    body.call()
                 }
             }
             return
