@@ -40,8 +40,9 @@ spec:
         }
     }
     parameters {
-        string(name: 'CUSTOM_ADDRESS',      defaultValue: '', description: '追加するカスタムアドレス（例: alias@your-zone.example.com）')
-        string(name: 'DESTINATION_ADDRESS', defaultValue: '', description: '転送先メールアドレス（例: real@gmail.com）。未登録ならアカウントへ登録要求も実施')
+        string(name: 'CUSTOM_LOCAL_PART',   defaultValue: '', description: '追加するカスタムアドレスのローカル部（@より前。例: umi）')
+        string(name: 'CUSTOM_DOMAIN',       defaultValue: '', description: 'カスタムアドレスの FQDN。空欄なら mail.sk4869.info を使用')
+        string(name: 'DESTINATION_ADDRESS', defaultValue: '', description: '転送先メールアドレス。空欄なら sk4869pw4869@gmail.com を使用。未登録ならアカウントへ登録要求も実施')
         string(name: 'RULE_NAME',           defaultValue: '', description: 'ルール名。空欄なら "forward <custom> -> <destination>" を自動採番')
         booleanParam(name: 'RULE_ENABLED',  defaultValue: true, description: '作成するルールを有効化するか')
         booleanParam(name: 'SEND_TEST_MAIL', defaultValue: true, description: '登録成功後にカスタムアドレスへテストメールを送信する')
@@ -62,12 +63,24 @@ spec:
         stage('Validate Parameters') {
             steps {
                 script {
-                    def custom = (params.CUSTOM_ADDRESS ?: '').trim()
-                    def dest   = (params.DESTINATION_ADDRESS ?: '').trim()
-                    def emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+                    def local  = (params.CUSTOM_LOCAL_PART ?: '').trim()
+                    def domain = (params.CUSTOM_DOMAIN ?: '').trim() ?: 'mail.sk4869.info'
+                    def dest   = (params.DESTINATION_ADDRESS ?: '').trim() ?: 'sk4869pw4869@gmail.com'
+                    def emailRe  = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+                    def domainRe = /^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)+$/
 
+                    if (!local) {
+                        error('CUSTOM_LOCAL_PART を指定してください（例: umi）')
+                    }
+                    if (local.contains('@')) {
+                        error("CUSTOM_LOCAL_PART に '@' を含めないでください: '${local}'")
+                    }
+                    if (!(domain ==~ domainRe)) {
+                        error("CUSTOM_DOMAIN が不正です: '${domain}'")
+                    }
+                    def custom = "${local}@${domain}"
                     if (!(custom ==~ emailRe)) {
-                        error("CUSTOM_ADDRESS が不正です: '${custom}'")
+                        error("組み立てたカスタムアドレスが不正です: '${custom}'")
                     }
                     if (!(dest ==~ emailRe)) {
                         error("DESTINATION_ADDRESS が不正です: '${dest}'")
