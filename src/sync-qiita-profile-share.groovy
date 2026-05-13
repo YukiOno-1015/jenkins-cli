@@ -8,6 +8,9 @@ import groovy.transform.Field
  * 目的:
  * - 複数 Qiita アカウントの「フォロー中ユーザー」「フォロー中タグ」を収集し、
  *   各アカウントへ相互反映する（A/B/C の差分を埋める）。
+ * - さらに、本パイプラインに登録されたアカウント同士を相互フォローさせる。
+ *   （A/B/C を登録 → B/C が A を、A/C が B を、A/B が C をフォロー。トークン
+ *    ユーザーが増えれば対象も自動拡張）
  *
  * 前提:
  * - Jenkins Secret text credential に Qiita API トークンを登録済み
@@ -178,14 +181,20 @@ spec:
                         error('同期対象の有効アカウントを1件も収集できませんでした。')
                     }
 
-                    def unionFollowees = activeAccounts.collectMany { it.followeeIds ?: [] }.findAll { it }.unique()
+                    // 既存のフォロー先 union に加え、本パイプライン参加アカウントの userId も
+                    // ターゲットへ含める。これにより A/B/C を登録すると相互にフォローし合う。
+                    // 各アカウントの「自分自身」は Sync ステージで除外されるため、結果的に
+                    // 自分以外の参加メンバー全員をフォローする形になる。
+                    def memberUserIds = activeAccounts.collect { it.userId }.findAll { it }.unique()
+                    def unionFollowees = (activeAccounts.collectMany { it.followeeIds ?: [] } + memberUserIds).findAll { it }.unique()
                     def unionTags = activeAccounts.collectMany { it.tagIds ?: [] }.findAll { it }.unique()
 
                     syncConfig.activeAccounts = activeAccounts
+                    syncConfig.memberUserIds = memberUserIds
                     syncConfig.unionFollowees = unionFollowees
                     syncConfig.unionTags = unionTags
 
-                    echo "収集サマリ: accounts=${activeAccounts.size()}, unionFollowees=${unionFollowees.size()}, unionTags=${unionTags.size()}"
+                    echo "収集サマリ: accounts=${activeAccounts.size()}, members=${memberUserIds.size()} (${memberUserIds.join(', ')}), unionFollowees=${unionFollowees.size()}, unionTags=${unionTags.size()}"
                 }
             }
         }
