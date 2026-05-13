@@ -44,6 +44,7 @@ spec:
         string(name: 'DESTINATION_ADDRESS', defaultValue: '', description: '転送先メールアドレス（例: real@gmail.com）。未登録ならアカウントへ登録要求も実施')
         string(name: 'RULE_NAME',           defaultValue: '', description: 'ルール名。空欄なら "forward <custom> -> <destination>" を自動採番')
         booleanParam(name: 'RULE_ENABLED',  defaultValue: true, description: '作成するルールを有効化するか')
+        booleanParam(name: 'SEND_TEST_MAIL', defaultValue: true, description: '登録成功後にカスタムアドレスへテストメールを送信する')
     }
     options {
         skipDefaultCheckout(true)
@@ -210,6 +211,30 @@ spec:
                             }
                             echo "ルールを作成しました: tag=${createRes.body.result?.tag}"
                         }
+                    }
+                }
+            }
+        }
+
+        stage('Send Test Mail') {
+            when { expression { return params.SEND_TEST_MAIL } }
+            steps {
+                script {
+                    def subject = "[Cloudflare Email Routing] テスト送信 #${env.BUILD_NUMBER}"
+                    def body = """\
+このメールは Jenkins ジョブ '${env.JOB_NAME}' #${env.BUILD_NUMBER} から送信した
+Cloudflare Email Routing の疎通テストです。
+
+カスタムアドレス : ${env.CUSTOM_ADDR}
+転送先          : ${env.DEST_ADDR}
+ビルド URL      : ${env.BUILD_URL}
+
+このメールが転送先 (${env.DEST_ADDR}) で受信できれば Email Routing は正常に動作しています。
+""".stripIndent()
+                    mail to: env.CUSTOM_ADDR, subject: subject, body: body
+                    echo "テストメール送信完了: to=${env.CUSTOM_ADDR}"
+                    if (env.DEST_NEWLY_CREATED == 'true') {
+                        echo "注意: 転送先 ${env.DEST_ADDR} は未検証の可能性があるため、検証メール認証後に再送が必要なことがあります。"
                     }
                 }
             }
