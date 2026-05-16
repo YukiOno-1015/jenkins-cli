@@ -127,7 +127,7 @@ spec:
 
         string(
             name: 'QIITA_TOKEN_CREDENTIAL_IDS',
-            defaultValue: 'jqit-qiita-access-token,personal-qiita-access-token,lberc-qiita-access-token,honoka-qiita-access-token,umi-qiita-access-token',
+            defaultValue: 'jqit-qiita-access-token,personal-qiita-access-token,lberc-qiita-access-token,honoka-qiita-access-token,umi-qiita-access-token,kotori-qiita-access-token,nico-qiita-access-token,eri-qiita-access-token,nozomi-qiita-access-token',
             description: 'Qiita API Token の Jenkins Credential ID（カンマ区切り）。例: jqit-...,personal-...,lberc-...'
         )
 
