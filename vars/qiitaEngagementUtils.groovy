@@ -172,37 +172,127 @@ def saveStateIds(String stateFilePath, List ids) {
 }
 
 /*
- * Organization の公開フィードから記事ID候補を抽出する。
+ * Organization の記事一覧を取得する。
+ * 返却形式: [[id, title, url, org, createdAt, updatedAt, privateFlg], ...]
  *
- * まず activities.atom を試し、
- * 失敗時は /feed をフォールバックとして試す。
+ * Primary : Qiita API /items?query=org:{org} を全件ページング取得。
+ *           検索結果に organization_url_name を含むため /items/{id} 再確認は不要。
+ * Fallback: API 取得に失敗したときのみ activities.atom をスクレイピングし、
+ *           抽出した item_id を /items/{id} で補完する。
  */
-def discoverOrganizationItemIds(Map cfg, String orgName) {
-    List<String> candidateUrls = [
-        "https://qiita.com/organizations/${orgName}/activities.atom",
-        "https://qiita.com/organizations/${orgName}/feed"
-    ]
-
-    String feedXml = ''
-    String usedUrl = ''
-
-    for (String url : candidateUrls) {
-        def res = httpGetText(cfg, url, false)
-        if (res.code == 200 && (res.body ?: '').toString().trim()) {
-            feedXml = res.body.toString()
-            usedUrl = url
-            break
-        }
-        echo "[INFO] フィード取得失敗またはレスポンスが空: org=${orgName}, url=${url}, HTTP=${res.code}"
+def discoverOrganizationItems(Map cfg, String apiBase, String orgName) {
+    def apiItems = discoverOrgItemsViaApi(cfg, apiBase, orgName)
+    if (apiItems != null) {
+        echo "Organization 記事を API から取得: org=${orgName}, 件数=${apiItems.size()}"
+        return apiItems
     }
 
-    if (!feedXml) {
-        echo "[WARN] Organization の公開フィードを取得できませんでした: ${orgName}"
+    echo "[WARN] API での記事取得に失敗。atom feed にフォールバックします: org=${orgName}"
+    return discoverOrgItemsViaAtom(cfg, apiBase, orgName)
+}
+
+/*
+ * Primary: Qiita API の検索（query=org:{org}）で記事を全件ページング取得する。
+ * page=1 が非200または非配列のときは null を返し、呼び出し側でフォールバックさせる。
+ */
+def discoverOrgItemsViaApi(Map cfg, String apiBase, String orgName) {
+    int perPage = 100
+    int maxPage = 20  // 最大 2000 件。新しい順に返るため通常はこれで十分。
+    String encodedQuery = URLEncoder.encode("org:${orgName}", 'UTF-8')
+    def items = []
+
+    for (int page = 1; page <= maxPage; page++) {
+        def res = qiitaGet(cfg, apiBase, "/items?query=${encodedQuery}&per_page=${perPage}&page=${page}")
+
+        if (res.code != 200 || !(res.body instanceof List)) {
+            if (page == 1) {
+                echo "[WARN] API 記事検索に失敗: org=${orgName}, HTTP=${res.code}"
+                return null
+            }
+            echo "[WARN] API 記事検索が途中で失敗（取得済み分で継続）: org=${orgName}, page=${page}, HTTP=${res.code}"
+            break
+        }
+
+        def chunk = res.body
+        if (chunk.isEmpty()) {
+            break
+        }
+
+        for (def item : chunk) {
+            if (!(item instanceof Map)) {
+                continue
+            }
+            // query=org: の結果は基本的に当該 org のみだが、念のため確認する
+            def itemOrg = (item.organization_url_name ?: '').toString().trim()
+            if (itemOrg != orgName) {
+                continue
+            }
+            items << toOrgItemMap(item, orgName)
+        }
+
+        if (chunk.size() < perPage) {
+            break
+        }
+    }
+
+    return items
+}
+
+/*
+ * Fallback: activities.atom から item_id を抽出し、/items/{id} で詳細を補完する。
+ */
+def discoverOrgItemsViaAtom(Map cfg, String apiBase, String orgName) {
+    def ids = discoverOrganizationItemIds(cfg, orgName)
+    def items = []
+
+    for (String id : ids) {
+        def itemRes = qiitaGet(cfg, apiBase, "/items/${id}")
+        if (itemRes.code != 200 || !(itemRes.body instanceof Map)) {
+            echo "[WARN] 記事詳細の取得失敗: id=${id}, HTTP=${itemRes.code}"
+            continue
+        }
+
+        def item = itemRes.body
+        def itemOrg = (item.organization_url_name ?: '').toString().trim()
+        if (itemOrg != orgName) {
+            echo "[INFO] 対象 Organization と一致しないため除外: id=${id}, 期待=${orgName}, 実際=${itemOrg ?: '（なし）'}"
+            continue
+        }
+        items << toOrgItemMap(item, orgName)
+    }
+
+    return items
+}
+
+/*
+ * Qiita API の記事レスポンスを、エンゲージメント処理で使う共通マップへ整形する。
+ */
+def toOrgItemMap(def item, String orgName) {
+    return [
+        id        : (item.id ?: '').toString(),
+        title     : (item.title ?: '').toString(),
+        url       : (item.url ?: '').toString(),
+        org       : orgName,
+        createdAt : (item.created_at ?: '').toString(),
+        updatedAt : (item.updated_at ?: '').toString(),
+        privateFlg: item.private == true
+    ]
+}
+
+/*
+ * Organization の公開フィード（activities.atom）から記事ID候補を抽出する。
+ * discoverOrgItemsViaAtom のフォールバック経路で使用する。
+ */
+def discoverOrganizationItemIds(Map cfg, String orgName) {
+    String feedUrl = "https://qiita.com/organizations/${orgName}/activities.atom"
+    def res = httpGetText(cfg, feedUrl, false)
+
+    if (res.code != 200 || !(res.body ?: '').toString().trim()) {
+        echo "[WARN] Organization の公開フィードを取得できませんでした: org=${orgName}, url=${feedUrl}, HTTP=${res.code}"
         return []
     }
 
-    echo "使用する Organization フィード: ${usedUrl}"
-
+    String feedXml = res.body.toString()
     def matcher = (feedXml =~ /https:\/\/qiita\.com\/[^\/<"\s]+\/items\/([A-Za-z0-9]+)/)
     def ids = []
 

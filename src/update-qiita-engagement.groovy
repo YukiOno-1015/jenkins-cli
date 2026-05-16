@@ -38,7 +38,7 @@ try {
  *   値: write_qiita を含む Qiita API Token
  *
  * ■主な特徴
- *   - Organization フィードから記事候補を抽出
+ *   - Organization の記事候補を Qiita API（フォールバック: 公開フィード）から抽出
  *   - 処理済み item_id を state ファイルへ保存
  *   - DRY_RUN で書き込みなし検証が可能
  *   - 429 / 5xx / 通信失敗相当に対して簡易リトライ
@@ -295,56 +295,20 @@ spec:
 
                     withCredentials([string(credentialsId: readerCredentialId, variable: 'QIITA_TOKEN')]) {
                         /*
-                         * 各 Organization について、フィードから記事候補を検出。
+                         * 各 Organization の記事候補を検出する。
+                         * Qiita API (query=org:{org}) を主取得手段とし、
+                         * 失敗時のみ activities.atom にフォールバックする。
                          */
                         for (String orgName : qiitaConfig.organizations) {
-                            def itemIds = qiitaEngagementUtils.discoverOrganizationItemIds(qiitaConfig, orgName)
+                            def orgItems = qiitaEngagementUtils.discoverOrganizationItems(qiitaConfig, env.QIITA_API_BASE, orgName)
 
-                            if (itemIds.isEmpty()) {
-                                echo "[INFO] Organization の公開フィードから記事 ID が見つかりませんでした: ${orgName}"
+                            if (orgItems.isEmpty()) {
+                                echo "[INFO] Organization の記事が見つかりませんでした: ${orgName}"
                                 continue
                             }
 
-                            echo "Organization フィードから ${itemIds.size()} 件の記事 ID を検出: ${orgName}"
-
-                            /*
-                             * 各 item_id を詳細APIで確認し、
-                             * 本当に対象 Organization の公開記事かチェックする。
-                             */
-                            for (String itemId : itemIds) {
-                                def itemRes = qiitaEngagementUtils.qiitaGet(qiitaConfig, env.QIITA_API_BASE, "/items/${itemId}")
-                                if (itemRes.code != 200) {
-                                    echo "[WARN] 記事詳細の取得失敗: id=${itemId}, HTTP=${itemRes.code}"
-                                    continue
-                                }
-
-                                if (!(itemRes.body instanceof Map)) {
-                                    echo "[WARN] 記事詳細のレスポンスが予期しない形式です: id=${itemId}"
-                                    continue
-                                }
-
-                                def item = itemRes.body
-                                def itemOrgName = (item.organization_url_name ?: '').toString().trim()
-
-                                /*
-                                 * フィード抽出だけだと誤検出余地があるため、
-                                 * organization_url_name で最終確認する。
-                                 */
-                                if (!itemOrgName || itemOrgName != orgName) {
-                                    echo "[INFO] 対象 Organization と一致しないため除外: id=${itemId}, 期待=${orgName}, 実際=${itemOrgName ?: '（なし）'}"
-                                    continue
-                                }
-
-                                targets << [
-                                    id         : itemId,
-                                    title      : (item.title ?: '').toString(),
-                                    url        : (item.url ?: '').toString(),
-                                    org        : orgName,
-                                    createdAt  : (item.created_at ?: '').toString(),
-                                    updatedAt  : (item.updated_at ?: '').toString(),
-                                    privateFlg : item.private == true
-                                ]
-                            }
+                            echo "Organization 記事を ${orgItems.size()} 件検出: ${orgName}"
+                            targets.addAll(orgItems)
                         }
 
                         /*
