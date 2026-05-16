@@ -78,7 +78,6 @@ spec:
     options {
         skipDefaultCheckout(true)
         timestamps()
-        disableConcurrentBuilds()
         buildDiscarder(logRotator(numToKeepStr: '30'))
     }
 
@@ -165,12 +164,28 @@ spec:
 
     stages {
         stage('Checkout SCM') {
+            when {
+                beforeAgent true
+                expression {
+                    // 前回ビルドが実行中なら今回は丸ごとスキップする（多重実行防止）
+                    if (concurrentRunInProgress()) {
+                        env.CONCURRENCY_SKIP = 'true'
+                        return false
+                    }
+                    env.CONCURRENCY_SKIP = 'false'
+                    return true
+                }
+            }
             steps {
                 echo 'SCM チェックアウトをスキップします（パイプラインソースはSCMから読み込み済み）。'
             }
         }
 
         stage('Validate Settings') {
+            when {
+                beforeAgent true
+                expression { return env.CONCURRENCY_SKIP != 'true' }
+            }
             steps {
                 script {
                     /*
@@ -240,6 +255,10 @@ spec:
         }
 
         stage('Verify Qiita Token') {
+            when {
+                beforeAgent true
+                expression { return env.CONCURRENCY_SKIP != 'true' }
+            }
             steps {
                 script {
                     def activeCredentialIds = []
@@ -275,6 +294,10 @@ spec:
         }
 
         stage('Monitor & Engage') {
+            when {
+                beforeAgent true
+                expression { return env.CONCURRENCY_SKIP != 'true' }
+            }
             steps {
                 script {
                     /*
@@ -751,4 +774,24 @@ def parseBody(String bodyText) {
     }
 
     return text
+}
+
+/*
+ * 同一ジョブの前回ビルドが実行中かどうかを判定する（多重実行防止）。
+ * 実行中を検出した場合は currentBuild を NOT_BUILT にし、ログを出して true を返す。
+ * 直近 30 ビルドまで遡って確認する（スキップ済みビルドを挟んでも検出できるように）。
+ */
+boolean concurrentRunInProgress() {
+    def b = currentBuild.previousBuild
+    int checked = 0
+    while (b != null && checked < 30) {
+        if (b.result == null) {
+            echo "前回ビルド #${b.number} が実行中のため、今回はスキップします。"
+            currentBuild.result = 'NOT_BUILT'
+            return true
+        }
+        b = b.previousBuild
+        checked++
+    }
+    return false
 }
