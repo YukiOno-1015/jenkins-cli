@@ -338,13 +338,21 @@ pipeline {
 
     options {
         timestamps()
-        disableConcurrentBuilds()
     }
 
     stages {
+        stage('Concurrency Guard') {
+            steps {
+                script {
+                    // 前回ビルドが実行中なら今回は以降のステージを全てスキップする
+                    env.CONCURRENCY_SKIP = concurrentRunInProgress() ? 'true' : 'false'
+                }
+            }
+        }
+
         stage('Test Notifications') {
             when {
-                expression { return params.TEST_NOTIFICATIONS_ONLY }
+                expression { return env.CONCURRENCY_SKIP != 'true' && params.TEST_NOTIFICATIONS_ONLY }
             }
             steps {
                 script {
@@ -359,7 +367,7 @@ pipeline {
 
         stage('Inspect Proxmox Hosts') {
             when {
-                expression { return !params.TEST_NOTIFICATIONS_ONLY }
+                expression { return env.CONCURRENCY_SKIP != 'true' && !params.TEST_NOTIFICATIONS_ONLY }
             }
             steps {
                 script {
@@ -406,7 +414,7 @@ pipeline {
 
         stage('Apply Proxmox Updates') {
             when {
-                expression { return !params.TEST_NOTIFICATIONS_ONLY && params.APPLY_UPDATES }
+                expression { return env.CONCURRENCY_SKIP != 'true' && !params.TEST_NOTIFICATIONS_ONLY && params.APPLY_UPDATES }
             }
             steps {
                 script {
@@ -465,4 +473,24 @@ ${summarizePendingUpdates(proxmoxHostResults)}""".trim()
             echo 'Proxmox ホストの調査/更新が失敗しました。コンソールログを確認してください。'
         }
     }
+}
+
+/*
+ * 同一ジョブの前回ビルドが実行中かどうかを判定する（多重実行防止）。
+ * 実行中を検出した場合は currentBuild を NOT_BUILT にし、ログを出して true を返す。
+ * 直近 30 ビルドまで遡って確認する（スキップ済みビルドを挟んでも検出できるように）。
+ */
+boolean concurrentRunInProgress() {
+    def b = currentBuild.previousBuild
+    int checked = 0
+    while (b != null && checked < 30) {
+        if (b.result == null) {
+            echo "前回ビルド #${b.number} が実行中のため、今回はスキップします。"
+            currentBuild.result = 'NOT_BUILT'
+            return true
+        }
+        b = b.previousBuild
+        checked++
+    }
+    return false
 }

@@ -26,7 +26,6 @@ pipeline {
     options {
         skipDefaultCheckout(true)
         timestamps()
-        disableConcurrentBuilds()
         buildDiscarder(logRotator(numToKeepStr: '50'))
         timeout(time: 20, unit: 'MINUTES')
     }
@@ -56,6 +55,10 @@ pipeline {
 
     stages {
         stage('外部スピードテスト実行') {
+            when {
+                beforeAgent true
+                expression { return !concurrentRunInProgress() }
+            }
             agent {
                 kubernetes {
                     namespace params.NAMESPACE
@@ -511,4 +514,24 @@ def parseJsonSafely(String raw, String label) {
         echo "${label}: JSON 解析に失敗しました (${e.message})"
         return [error: "${label}: invalid JSON".toString(), raw: raw]
     }
+}
+
+/*
+ * 同一ジョブの前回ビルドが実行中かどうかを判定する（多重実行防止）。
+ * 実行中を検出した場合は currentBuild を NOT_BUILT にし、ログを出して true を返す。
+ * 直近 30 ビルドまで遡って確認する（スキップ済みビルドを挟んでも検出できるように）。
+ */
+boolean concurrentRunInProgress() {
+    def b = currentBuild.previousBuild
+    int checked = 0
+    while (b != null && checked < 30) {
+        if (b.result == null) {
+            echo "前回ビルド #${b.number} が実行中のため、今回はスキップします。"
+            currentBuild.result = 'NOT_BUILT'
+            return true
+        }
+        b = b.previousBuild
+        checked++
+    }
+    return false
 }
