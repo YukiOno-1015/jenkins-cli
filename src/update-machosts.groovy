@@ -10,7 +10,7 @@
 
 def TARGET_HOSTS = [
     // さくらサーバ
-    'sakura-docker',
+    //'sakura-docker',
     // Proxmox VE サーバ
     'pve-nico',
     'pve-umi',
