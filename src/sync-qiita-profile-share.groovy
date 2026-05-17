@@ -180,40 +180,25 @@ spec:
             }
             steps {
                 script {
+                    // アカウント単位でプロフィール収集を並列実行する（各 Credential は独立）
                     def activeAccounts = []
+                    def collectBranches = [:]
+                    def collected = [:]
+                    syncConfig.credentialIds.each { collected[it] = null }
 
                     for (String credentialId : syncConfig.credentialIds) {
-                        try {
-                            withCredentials([string(credentialsId: credentialId, variable: 'QIITA_TOKEN')]) {
-                                def cfg = [
-                                    httpTimeoutSec: syncConfig.httpTimeoutSec,
-                                    httpRetryCount: syncConfig.httpRetryCount
-                                ]
+                        def cid = credentialId
+                        collectBranches["collect-${cid}"] = {
+                            collected[cid] = collectAccountProfile(cid)
+                        }
+                    }
 
-                                def whoami = qiitaEngagementUtils.qiitaGet(cfg, env.QIITA_API_BASE, '/authenticated_user')
-                                if (whoami.code != 200 || !(whoami.body instanceof Map)) {
-                                    echo "[WARN] 認証ユーザー取得に失敗したためスキップします: credentialId=${credentialId}, HTTP=${whoami.code}"
-                                } else {
-                                    def userId = (whoami.body.id ?: '').toString().trim()
-                                    if (!userId) {
-                                        echo "[WARN] userId が空のためスキップします: credentialId=${credentialId}"
-                                    } else {
-                                        def followees = collectPaged(cfg, "/users/${userId}/followees", syncConfig.maxPageCount)
-                                        def followingTags = collectPaged(cfg, "/users/${userId}/following_tags", syncConfig.maxPageCount)
+                    parallel collectBranches
 
-                                        activeAccounts << [
-                                            credentialId : credentialId,
-                                            userId       : userId,
-                                            followeeIds  : followees.collect { (it?.id ?: '').toString().trim() }.findAll { it }.unique(),
-                                            tagIds       : followingTags.collect { (it?.id ?: '').toString().trim() }.findAll { it }.unique()
-                                        ]
-
-                                        echo "収集完了: credentialId=${credentialId}, userId=${userId}, followees=${followees.size()}, tags=${followingTags.size()}"
-                                    }
-                                }
-                            }
-                        } catch (Exception ex) {
-                            echo "[WARN] Credential 処理に失敗したためスキップします: credentialId=${credentialId}, reason=${ex.message}"
+                    // credentialIds の順序を保ったまま有効アカウントを集約する
+                    for (String credentialId : syncConfig.credentialIds) {
+                        if (collected[credentialId] != null) {
+                            activeAccounts << collected[credentialId]
                         }
                     }
 
@@ -246,91 +231,38 @@ spec:
             }
             steps {
                 script {
+                    int throttleMs = syncConfig.apiThrottleMs ?: 0
+                    int maxFollowsPerRun = syncConfig.maxFollowsPerRun ?: 0
+
+                    // アカウント単位で同期を並列実行する（各 Credential は別アカウントで独立）
+                    def syncBranches = [:]
+                    def syncResults = [:]
+                    syncConfig.activeAccounts.each { syncResults[it.credentialId] = null }
+
+                    for (def account : syncConfig.activeAccounts) {
+                        def acc = account
+                        syncBranches["sync-${acc.credentialId}"] = {
+                            syncResults[acc.credentialId] = syncAccount(acc, maxFollowsPerRun, throttleMs)
+                        }
+                    }
+
+                    parallel syncBranches
+
+                    // 各ブランチの集計をマージする
                     int appliedUserFollows = 0
                     int appliedTagFollows = 0
                     int skipped = 0
                     int failures = 0
-                    int throttleMs = syncConfig.apiThrottleMs ?: 0
-                    int maxFollowsPerRun = syncConfig.maxFollowsPerRun ?: 0
                     int deferredFollows = 0
-
-                    for (def account : syncConfig.activeAccounts) {
-                        def credentialId = account.credentialId
-                        def selfUserId = account.userId
-                        def ownFolloweeIds = (account.followeeIds ?: []) as Set
-                        def ownTagIds = (account.tagIds ?: []) as Set
-
-                        def missingFollowees = ((syncConfig.unionFollowees as Set) - ownFolloweeIds - ([selfUserId] as Set)) as List
-
-                        // 1 run / 1 アカウントあたりの follow 上限。Qiita の spam 判定回避目的。
-                        // 上限を超えた分は次回 run に持ち越す（冪等なので自然に解決）。
-                        def followeesToProcess = missingFollowees
-                        int deferredThisAccount = 0
-                        if (maxFollowsPerRun > 0 && missingFollowees.size() > maxFollowsPerRun) {
-                            followeesToProcess = missingFollowees.take(maxFollowsPerRun)
-                            deferredThisAccount = missingFollowees.size() - maxFollowsPerRun
-                            deferredFollows += deferredThisAccount
+                    for (def r : syncResults.values()) {
+                        if (r == null) {
+                            continue
                         }
-                        def missingTags = (syncConfig.unionTags as Set) - ownTagIds
-
-                        echo "同期対象: credentialId=${credentialId}, userId=${selfUserId}, 追加予定 followees=${followeesToProcess.size()}/${missingFollowees.size()}, tags=${missingTags.size()}" + (deferredThisAccount > 0 ? " (次回持ち越し=${deferredThisAccount})" : '')
-
-                        withCredentials([string(credentialsId: credentialId, variable: 'QIITA_TOKEN')]) {
-                            def cfg = [
-                                httpTimeoutSec: syncConfig.httpTimeoutSec,
-                                httpRetryCount: syncConfig.httpRetryCount
-                            ]
-
-                            for (String targetUserId : followeesToProcess) {
-                                if (syncConfig.dryRun) {
-                                    echo "[DRY_RUN] ユーザーフォロー追加予定: credentialId=${credentialId}, targetUser=${targetUserId}"
-                                    skipped++
-                                    continue
-                                }
-
-                                def res = qiitaPutWithFallback(cfg, [
-                                    "/users/${targetUserId}/following",
-                                    "/users/${targetUserId}/follow"
-                                ])
-
-                                if (qiitaEngagementUtils.isSuccessCode(res.code) || res.code == 409) {
-                                    appliedUserFollows++
-                                } else {
-                                    failures++
-                                    echo "[WARN] ユーザーフォロー反映失敗: credentialId=${credentialId}, targetUser=${targetUserId}, HTTP=${res.code}, path=${res.path}, body=${qiitaEngagementUtils.trimForLog(res.rawBody)}"
-                                }
-
-                                if (throttleMs > 0) {
-                                    sleep time: throttleMs, unit: 'MILLISECONDS'
-                                }
-                            }
-
-                            for (String tagId : missingTags) {
-                                if (syncConfig.dryRun) {
-                                    echo "[DRY_RUN] タグフォロー追加予定: credentialId=${credentialId}, tag=${tagId}"
-                                    skipped++
-                                    continue
-                                }
-
-                                // タグIDに '#' 等が含まれる場合はURLエンコードが必要（例: C#→C%23）
-                                def encodedTagId = URLEncoder.encode(tagId, 'UTF-8')
-                                def res = qiitaPutWithFallback(cfg, [
-                                    "/tags/${encodedTagId}/following",
-                                    "/tags/${encodedTagId}/follow"
-                                ])
-
-                                if (qiitaEngagementUtils.isSuccessCode(res.code) || res.code == 409) {
-                                    appliedTagFollows++
-                                } else {
-                                    failures++
-                                    echo "[WARN] タグフォロー反映失敗: credentialId=${credentialId}, tag=${tagId}, HTTP=${res.code}, path=${res.path}, body=${qiitaEngagementUtils.trimForLog(res.rawBody)}"
-                                }
-
-                                if (throttleMs > 0) {
-                                    sleep time: throttleMs, unit: 'MILLISECONDS'
-                                }
-                            }
-                        }
+                        appliedUserFollows += r.applied
+                        appliedTagFollows  += r.appliedTags
+                        skipped            += r.skipped
+                        failures           += r.failures
+                        deferredFollows    += r.deferred
                     }
 
                     echo '同期結果:'
@@ -358,31 +290,23 @@ spec:
                     // 書き込み直後に followees を再取得し、union との差分（＝Qiita 側で
                     // silent drop されている可能性のある follow 件数）を可視化する。
                     // ここでは自動再試行は行わない。冪等構造のため次回 run で自然に拾い直す。
-                    def unionSet = (syncConfig.unionFollowees ?: []) as Set
-                    int totalGap = 0
+                    // アカウント単位で並列に検証する。
+                    def verifyBranches = [:]
+                    def verifyResults = [:]
+                    syncConfig.activeAccounts.each { verifyResults[it.credentialId] = 0 }
 
                     for (def account : syncConfig.activeAccounts) {
-                        def credentialId = account.credentialId
-                        def selfUserId = account.userId
-
-                        withCredentials([string(credentialsId: credentialId, variable: 'QIITA_TOKEN')]) {
-                            def cfg = [
-                                httpTimeoutSec: syncConfig.httpTimeoutSec,
-                                httpRetryCount: syncConfig.httpRetryCount
-                            ]
-                            def latestFollowees = collectPaged(cfg, "/users/${selfUserId}/followees", syncConfig.maxPageCount)
-                            def latestIds = latestFollowees.collect { (it?.id ?: '').toString().trim() }.findAll { it } as Set
-                            def gap = (unionSet - latestIds - ([selfUserId] as Set))
-                            totalGap += gap.size()
-
-                            if (gap.isEmpty()) {
-                                echo "検証 OK: credentialId=${credentialId}, userId=${selfUserId}, followees=${latestIds.size()} (union=${unionSet.size()})"
-                            } else {
-                                def sample = gap.take(10).join(', ')
-                                def suffix = gap.size() > 10 ? ' …他' : ''
-                                echo "[WARN] 同期検証で差分検出: credentialId=${credentialId}, userId=${selfUserId}, followees=${latestIds.size()}, gap=${gap.size()} (例: ${sample}${suffix})"
-                            }
+                        def acc = account
+                        verifyBranches["verify-${acc.credentialId}"] = {
+                            verifyResults[acc.credentialId] = verifyAccountGap(acc)
                         }
+                    }
+
+                    parallel verifyBranches
+
+                    int totalGap = 0
+                    for (def g : verifyResults.values()) {
+                        totalGap += (g ?: 0)
                     }
 
                     if (totalGap > 0) {
@@ -483,4 +407,164 @@ boolean concurrentRunInProgress() {
         checked++
     }
     return false
+}
+
+/*
+ * 指定 Credential のプロフィール（フォロー中ユーザー/タグ）を収集する。
+ * parallel ブランチから呼ばれる。成功時はアカウント情報 Map、失敗時は null を返す。
+ */
+def collectAccountProfile(String credentialId) {
+    def cfg = [
+        httpTimeoutSec: syncConfig.httpTimeoutSec,
+        httpRetryCount: syncConfig.httpRetryCount
+    ]
+    def result = null
+
+    try {
+        withCredentials([string(credentialsId: credentialId, variable: 'QIITA_TOKEN')]) {
+            def whoami = qiitaEngagementUtils.qiitaGet(cfg, env.QIITA_API_BASE, '/authenticated_user')
+            if (whoami.code != 200 || !(whoami.body instanceof Map)) {
+                echo "[WARN] 認証ユーザー取得に失敗したためスキップします: credentialId=${credentialId}, HTTP=${whoami.code}"
+            } else {
+                def userId = (whoami.body.id ?: '').toString().trim()
+                if (!userId) {
+                    echo "[WARN] userId が空のためスキップします: credentialId=${credentialId}"
+                } else {
+                    def followees = collectPaged(cfg, "/users/${userId}/followees", syncConfig.maxPageCount)
+                    def followingTags = collectPaged(cfg, "/users/${userId}/following_tags", syncConfig.maxPageCount)
+
+                    result = [
+                        credentialId : credentialId,
+                        userId       : userId,
+                        followeeIds  : followees.collect { (it?.id ?: '').toString().trim() }.findAll { it }.unique(),
+                        tagIds       : followingTags.collect { (it?.id ?: '').toString().trim() }.findAll { it }.unique()
+                    ]
+
+                    echo "収集完了: credentialId=${credentialId}, userId=${userId}, followees=${followees.size()}, tags=${followingTags.size()}"
+                }
+            }
+        }
+    } catch (Exception ex) {
+        echo "[WARN] Credential 処理に失敗したためスキップします: credentialId=${credentialId}, reason=${ex.message}"
+        return null
+    }
+
+    return result
+}
+
+/*
+ * 指定アカウントへ union との差分（ユーザー/タグ）をフォローする。
+ * parallel ブランチから安全に呼べるよう、集計は Map で返す
+ * （[applied, appliedTags, skipped, failures, deferred]）。
+ */
+def syncAccount(Map account, int maxFollowsPerRun, int throttleMs) {
+    def r = [applied: 0, appliedTags: 0, skipped: 0, failures: 0, deferred: 0]
+    def credentialId = account.credentialId
+    def selfUserId = account.userId
+    def ownFolloweeIds = (account.followeeIds ?: []) as Set
+    def ownTagIds = (account.tagIds ?: []) as Set
+
+    def missingFollowees = ((syncConfig.unionFollowees as Set) - ownFolloweeIds - ([selfUserId] as Set)) as List
+
+    // 1 run / 1 アカウントあたりの follow 上限。Qiita の spam 判定回避目的。
+    // 上限を超えた分は次回 run に持ち越す（冪等なので自然に解決）。
+    def followeesToProcess = missingFollowees
+    if (maxFollowsPerRun > 0 && missingFollowees.size() > maxFollowsPerRun) {
+        followeesToProcess = missingFollowees.take(maxFollowsPerRun)
+        r.deferred = missingFollowees.size() - maxFollowsPerRun
+    }
+    def missingTags = (syncConfig.unionTags as Set) - ownTagIds
+
+    echo "同期対象: credentialId=${credentialId}, userId=${selfUserId}, 追加予定 followees=${followeesToProcess.size()}/${missingFollowees.size()}, tags=${missingTags.size()}" + (r.deferred > 0 ? " (次回持ち越し=${r.deferred})" : '')
+
+    withCredentials([string(credentialsId: credentialId, variable: 'QIITA_TOKEN')]) {
+        def cfg = [
+            httpTimeoutSec: syncConfig.httpTimeoutSec,
+            httpRetryCount: syncConfig.httpRetryCount
+        ]
+
+        for (String targetUserId : followeesToProcess) {
+            if (syncConfig.dryRun) {
+                echo "[DRY_RUN] ユーザーフォロー追加予定: credentialId=${credentialId}, targetUser=${targetUserId}"
+                r.skipped++
+                continue
+            }
+
+            def res = qiitaPutWithFallback(cfg, [
+                "/users/${targetUserId}/following",
+                "/users/${targetUserId}/follow"
+            ])
+
+            if (qiitaEngagementUtils.isSuccessCode(res.code) || res.code == 409) {
+                r.applied++
+            } else {
+                r.failures++
+                echo "[WARN] ユーザーフォロー反映失敗: credentialId=${credentialId}, targetUser=${targetUserId}, HTTP=${res.code}, path=${res.path}, body=${qiitaEngagementUtils.trimForLog(res.rawBody)}"
+            }
+
+            if (throttleMs > 0) {
+                sleep time: throttleMs, unit: 'MILLISECONDS'
+            }
+        }
+
+        for (String tagId : missingTags) {
+            if (syncConfig.dryRun) {
+                echo "[DRY_RUN] タグフォロー追加予定: credentialId=${credentialId}, tag=${tagId}"
+                r.skipped++
+                continue
+            }
+
+            // タグIDに '#' 等が含まれる場合はURLエンコードが必要（例: C#→C%23）
+            def encodedTagId = URLEncoder.encode(tagId, 'UTF-8')
+            def res = qiitaPutWithFallback(cfg, [
+                "/tags/${encodedTagId}/following",
+                "/tags/${encodedTagId}/follow"
+            ])
+
+            if (qiitaEngagementUtils.isSuccessCode(res.code) || res.code == 409) {
+                r.appliedTags++
+            } else {
+                r.failures++
+                echo "[WARN] タグフォロー反映失敗: credentialId=${credentialId}, tag=${tagId}, HTTP=${res.code}, path=${res.path}, body=${qiitaEngagementUtils.trimForLog(res.rawBody)}"
+            }
+
+            if (throttleMs > 0) {
+                sleep time: throttleMs, unit: 'MILLISECONDS'
+            }
+        }
+    }
+
+    return r
+}
+
+/*
+ * 指定アカウントの followees を再取得し、union との差分件数を返す（検証用）。
+ * parallel ブランチから呼ばれる。
+ */
+def verifyAccountGap(Map account) {
+    def unionSet = (syncConfig.unionFollowees ?: []) as Set
+    def credentialId = account.credentialId
+    def selfUserId = account.userId
+    int gapSize = 0
+
+    withCredentials([string(credentialsId: credentialId, variable: 'QIITA_TOKEN')]) {
+        def cfg = [
+            httpTimeoutSec: syncConfig.httpTimeoutSec,
+            httpRetryCount: syncConfig.httpRetryCount
+        ]
+        def latestFollowees = collectPaged(cfg, "/users/${selfUserId}/followees", syncConfig.maxPageCount)
+        def latestIds = latestFollowees.collect { (it?.id ?: '').toString().trim() }.findAll { it } as Set
+        def gap = (unionSet - latestIds - ([selfUserId] as Set))
+        gapSize = gap.size()
+
+        if (gap.isEmpty()) {
+            echo "検証 OK: credentialId=${credentialId}, userId=${selfUserId}, followees=${latestIds.size()} (union=${unionSet.size()})"
+        } else {
+            def sample = gap.take(10).join(', ')
+            def suffix = gap.size() > 10 ? ' …他' : ''
+            echo "[WARN] 同期検証で差分検出: credentialId=${credentialId}, userId=${selfUserId}, followees=${latestIds.size()}, gap=${gap.size()} (例: ${sample}${suffix})"
+        }
+    }
+
+    return gapSize
 }
