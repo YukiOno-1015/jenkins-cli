@@ -352,120 +352,35 @@ spec:
                         int skippedCount  = 0
                         def processedKeys = []
 
+                        /*
+                         * トークン単位で engage を並列実行する。
+                         * 各 Credential は別 Qiita アカウントのため、レート制限・spam 判定は
+                         * 互いに独立しており、並列化しても安全。各ブランチ内は従来どおり
+                         * API_THROTTLE_MS で直列スロットルする。
+                         */
+                        def engageBranches = [:]
+                        def branchResults = [:]
+                        qiitaConfig.activeCredentialIds.each { branchResults[it] = null }
+
                         for (String credentialId : qiitaConfig.activeCredentialIds) {
-                            withCredentials([string(credentialsId: credentialId, variable: 'QIITA_TOKEN')]) {
-                                echo "[INFO] いいね/ストック実行中: credentialId=${credentialId}"
-
-                                /*
-                                 * 各記事に対して like / stock を実行。
-                                 */
-                                for (def target : targets) {
-                                    def stateKeyBase = "${credentialId}:${target.id}"
-                                    def legacyStateKey = stateKeyBase
-                                    def likeStateKey = "${stateKeyBase}:like"
-                                    def stockStateKey = "${stateKeyBase}:stock"
-
-                                    boolean likeAlreadyProcessed = existingSet.contains(legacyStateKey) || existingSet.contains(likeStateKey)
-                                    boolean stockAlreadyProcessed = existingSet.contains(legacyStateKey) || existingSet.contains(stockStateKey)
-
-                                    if ((!qiitaConfig.doLike || likeAlreadyProcessed) && (!qiitaConfig.doStock || stockAlreadyProcessed)) {
-                                        skippedCount++
-                                        continue
-                                    }
-
-                                    echo "対象記事: [${target.org}] ${target.title} (${target.id})"
-                                    echo "URL     : ${target.url}"
-                                    echo "日付    : 作成=${target.createdAt}, 更新=${target.updatedAt}"
-                                    echo "実行対象 Credential: ${credentialId}"
-
-                                    boolean likeOk  = !qiitaConfig.doLike || likeAlreadyProcessed
-                                    boolean stockOk = !qiitaConfig.doStock || stockAlreadyProcessed
-
-                                    if (qiitaConfig.dryRun) {
-                                        /*
-                                         * DRY_RUN では API 更新せず、成功扱いで進める。
-                                         */
-                                        echo "[DRY_RUN] ${target.id} への書き込みをスキップします。"
-                                        likeOk = true
-                                        stockOk = true
-                                        if (qiitaConfig.doLike && !likeAlreadyProcessed) {
-                                            processedKeys << likeStateKey
-                                            echo "[INFO] いいね実施済み state へ保存: ${likeStateKey}"
-                                        }
-                                        if (qiitaConfig.doStock && !stockAlreadyProcessed) {
-                                            processedKeys << stockStateKey
-                                            echo "[INFO] ストック実施済み state へ保存: ${stockStateKey}"
-                                        }
-                                    } else {
-                                        int throttleMs = qiitaConfig.apiThrottleMs ?: 0
-
-                                        if (qiitaConfig.doLike && !likeAlreadyProcessed) {
-                                            def likeRes = qiitaEngagementUtils.qiitaPut(qiitaConfig, env.QIITA_API_BASE, "/items/${target.id}/like")
-                                            if (qiitaEngagementUtils.isSuccessCode(likeRes.code)) {
-                                                likeOk = true
-                                                likedCount++
-                                                processedKeys << likeStateKey
-                                                echo "[INFO] いいね実施済み state へ保存: ${likeStateKey}"
-                                            } else if (likeRes.code == 409) {
-                                                /*
-                                                 * 既に like 済みなど、競合扱いを許容する場合。
-                                                 */
-                                                likeOk = true
-                                                skippedCount++
-                                                processedKeys << likeStateKey
-                                                echo "[INFO] いいね済みまたは競合のため成功扱い・state へ保存: ${likeStateKey}"
-                                            } else if (qiitaEngagementUtils.isAlreadyLikeResponse(likeRes)) {
-                                                likeOk = true
-                                                skippedCount++
-                                                processedKeys << likeStateKey
-                                                echo "[INFO] いいね済み（403 already_liked）のため成功扱い・state へ保存: ${likeStateKey}"
-                                            } else {
-                                                likeOk = false
-                                                echo "[WARN] いいね失敗: credentialId=${credentialId}, id=${target.id}, HTTP=${likeRes.code}, body=${qiitaEngagementUtils.trimForLog(likeRes.rawBody)}"
-                                            }
-
-                                            if (throttleMs > 0) {
-                                                sleep time: throttleMs, unit: 'MILLISECONDS'
-                                            }
-                                        }
-
-                                        if (qiitaConfig.doStock && !stockAlreadyProcessed) {
-                                            def stockRes = qiitaEngagementUtils.qiitaPut(qiitaConfig, env.QIITA_API_BASE, "/items/${target.id}/stock")
-                                            if (qiitaEngagementUtils.isSuccessCode(stockRes.code)) {
-                                                stockOk = true
-                                                stockedCount++
-                                                processedKeys << stockStateKey
-                                                echo "[INFO] ストック実施済み state へ保存: ${stockStateKey}"
-                                            } else if (stockRes.code == 409) {
-                                                stockOk = true
-                                                skippedCount++
-                                                processedKeys << stockStateKey
-                                                echo "[INFO] ストック済みまたは競合のため成功扱い・state へ保存: ${stockStateKey}"
-                                            } else if (qiitaEngagementUtils.isAlreadyStockResponse(stockRes)) {
-                                                stockOk = true
-                                                skippedCount++
-                                                processedKeys << stockStateKey
-                                                echo "[INFO] ストック済み（403 already_stocked）のため成功扱い・state へ保存: ${stockStateKey}"
-                                            } else {
-                                                stockOk = false
-                                                echo "[WARN] ストック失敗: credentialId=${credentialId}, id=${target.id}, HTTP=${stockRes.code}, body=${qiitaEngagementUtils.trimForLog(stockRes.rawBody)}"
-                                            }
-
-                                            if (throttleMs > 0) {
-                                                sleep time: throttleMs, unit: 'MILLISECONDS'
-                                            }
-                                        }
-                                    }
-
-                                    /*
-                                     * 各アクションの成功状態は個別に state へ保存する。
-                                     * 一部失敗時は未完了アクションのみ次回再試行する。
-                                     */
-                                    if (!likeOk || !stockOk) {
-                                        failedCount++
-                                    }
-                                }
+                            def cid = credentialId
+                            engageBranches["engage-${cid}"] = {
+                                branchResults[cid] = engageWithToken(cid, targets, existingSet)
                             }
+                        }
+
+                        parallel engageBranches
+
+                        // 各ブランチの集計結果をマージする
+                        for (def r : branchResults.values()) {
+                            if (r == null) {
+                                continue
+                            }
+                            likedCount   += r.liked
+                            stockedCount += r.stocked
+                            failedCount  += r.failed
+                            skippedCount += r.skipped
+                            processedKeys.addAll(r.processedKeys)
                         }
 
                         /*
@@ -794,4 +709,126 @@ boolean concurrentRunInProgress() {
         checked++
     }
     return false
+}
+
+/*
+ * 指定 Credential（Qiita トークン）で全 target 記事に like / stock を実行する。
+ * parallel ブランチから安全に呼べるよう、集計は呼び出し側へ Map で返し、
+ * 共有変数を直接加算しない（[liked, stocked, failed, skipped, processedKeys]）。
+ */
+def engageWithToken(String credentialId, List targets, Set existingSet) {
+    def r = [liked: 0, stocked: 0, failed: 0, skipped: 0, processedKeys: []]
+
+    withCredentials([string(credentialsId: credentialId, variable: 'QIITA_TOKEN')]) {
+        echo "[INFO] いいね/ストック実行中: credentialId=${credentialId}"
+
+        for (def target : targets) {
+            def stateKeyBase = "${credentialId}:${target.id}"
+            def legacyStateKey = stateKeyBase
+            def likeStateKey = "${stateKeyBase}:like"
+            def stockStateKey = "${stateKeyBase}:stock"
+
+            boolean likeAlreadyProcessed = existingSet.contains(legacyStateKey) || existingSet.contains(likeStateKey)
+            boolean stockAlreadyProcessed = existingSet.contains(legacyStateKey) || existingSet.contains(stockStateKey)
+
+            if ((!qiitaConfig.doLike || likeAlreadyProcessed) && (!qiitaConfig.doStock || stockAlreadyProcessed)) {
+                r.skipped++
+                continue
+            }
+
+            echo "対象記事: [${target.org}] ${target.title} (${target.id})"
+            echo "URL     : ${target.url}"
+            echo "日付    : 作成=${target.createdAt}, 更新=${target.updatedAt}"
+            echo "実行対象 Credential: ${credentialId}"
+
+            boolean likeOk  = !qiitaConfig.doLike || likeAlreadyProcessed
+            boolean stockOk = !qiitaConfig.doStock || stockAlreadyProcessed
+
+            if (qiitaConfig.dryRun) {
+                /*
+                 * DRY_RUN では API 更新せず、成功扱いで進める。
+                 */
+                echo "[DRY_RUN] ${target.id} への書き込みをスキップします。"
+                likeOk = true
+                stockOk = true
+                if (qiitaConfig.doLike && !likeAlreadyProcessed) {
+                    r.processedKeys << likeStateKey
+                    echo "[INFO] いいね実施済み state へ保存: ${likeStateKey}"
+                }
+                if (qiitaConfig.doStock && !stockAlreadyProcessed) {
+                    r.processedKeys << stockStateKey
+                    echo "[INFO] ストック実施済み state へ保存: ${stockStateKey}"
+                }
+            } else {
+                int throttleMs = qiitaConfig.apiThrottleMs ?: 0
+
+                if (qiitaConfig.doLike && !likeAlreadyProcessed) {
+                    def likeRes = qiitaEngagementUtils.qiitaPut(qiitaConfig, env.QIITA_API_BASE, "/items/${target.id}/like")
+                    if (qiitaEngagementUtils.isSuccessCode(likeRes.code)) {
+                        likeOk = true
+                        r.liked++
+                        r.processedKeys << likeStateKey
+                        echo "[INFO] いいね実施済み state へ保存: ${likeStateKey}"
+                    } else if (likeRes.code == 409) {
+                        /*
+                         * 既に like 済みなど、競合扱いを許容する場合。
+                         */
+                        likeOk = true
+                        r.skipped++
+                        r.processedKeys << likeStateKey
+                        echo "[INFO] いいね済みまたは競合のため成功扱い・state へ保存: ${likeStateKey}"
+                    } else if (qiitaEngagementUtils.isAlreadyLikeResponse(likeRes)) {
+                        likeOk = true
+                        r.skipped++
+                        r.processedKeys << likeStateKey
+                        echo "[INFO] いいね済み（403 already_liked）のため成功扱い・state へ保存: ${likeStateKey}"
+                    } else {
+                        likeOk = false
+                        echo "[WARN] いいね失敗: credentialId=${credentialId}, id=${target.id}, HTTP=${likeRes.code}, body=${qiitaEngagementUtils.trimForLog(likeRes.rawBody)}"
+                    }
+
+                    if (throttleMs > 0) {
+                        sleep time: throttleMs, unit: 'MILLISECONDS'
+                    }
+                }
+
+                if (qiitaConfig.doStock && !stockAlreadyProcessed) {
+                    def stockRes = qiitaEngagementUtils.qiitaPut(qiitaConfig, env.QIITA_API_BASE, "/items/${target.id}/stock")
+                    if (qiitaEngagementUtils.isSuccessCode(stockRes.code)) {
+                        stockOk = true
+                        r.stocked++
+                        r.processedKeys << stockStateKey
+                        echo "[INFO] ストック実施済み state へ保存: ${stockStateKey}"
+                    } else if (stockRes.code == 409) {
+                        stockOk = true
+                        r.skipped++
+                        r.processedKeys << stockStateKey
+                        echo "[INFO] ストック済みまたは競合のため成功扱い・state へ保存: ${stockStateKey}"
+                    } else if (qiitaEngagementUtils.isAlreadyStockResponse(stockRes)) {
+                        stockOk = true
+                        r.skipped++
+                        r.processedKeys << stockStateKey
+                        echo "[INFO] ストック済み（403 already_stocked）のため成功扱い・state へ保存: ${stockStateKey}"
+                    } else {
+                        stockOk = false
+                        echo "[WARN] ストック失敗: credentialId=${credentialId}, id=${target.id}, HTTP=${stockRes.code}, body=${qiitaEngagementUtils.trimForLog(stockRes.rawBody)}"
+                    }
+
+                    if (throttleMs > 0) {
+                        sleep time: throttleMs, unit: 'MILLISECONDS'
+                    }
+                }
+            }
+
+            /*
+             * 各アクションの成功状態は個別に state へ保存する。
+             * 一部失敗時は未完了アクションのみ次回再試行する。
+             */
+            if (!likeOk || !stockOk) {
+                r.failed++
+            }
+        }
+    }
+
+    return r
 }
