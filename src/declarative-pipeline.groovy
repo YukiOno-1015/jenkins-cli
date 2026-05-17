@@ -28,6 +28,7 @@ def RULE_DEFS = [
             'sonarqube-cli.sk4869.info',
             'jenkins-cli.sk4869.info',
             'pv-cli.sk4869.info',
+            'n8-cli.sk4869.info',
         ],
     ],
 ]
