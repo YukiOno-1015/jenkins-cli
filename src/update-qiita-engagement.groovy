@@ -84,7 +84,7 @@ spec:
     parameters {
         string(
             name: 'TARGET_ORGANIZATIONS',
-            defaultValue: 'jqiit-co,lberc',
+            defaultValue: 'jqiit-co',
             description: '監視対象の公開 Qiita organization_url_name（カンマ区切り）'
         )
 
