@@ -262,6 +262,9 @@ spec:
             steps {
                 script {
                     def activeCredentialIds = []
+                    // credentialId -> その token が認証する Qiita userId。
+                    // 「自分の記事へのいいね」（Qiita 仕様で 403 forbidden）を事前回避するために使う。
+                    def credentialUserIds = [:]
 
                     for (String credentialId : qiitaConfig.credentialIds) {
                         try {
@@ -276,6 +279,7 @@ spec:
                                     def userId = (whoami.body instanceof Map) ? (whoami.body.id ?: 'unknown') : 'unknown'
                                     echo "認証ユーザー: credentialId=${credentialId}, user=${userId}"
                                     activeCredentialIds << credentialId
+                                    credentialUserIds[credentialId] = userId.toString()
                                 }
                             }
                         } catch (Exception ex) {
@@ -288,6 +292,7 @@ spec:
                     }
 
                     qiitaConfig.activeCredentialIds = activeCredentialIds
+                    qiitaConfig.credentialUserIds = credentialUserIds
                     echo "有効 Credential IDs: ${qiitaConfig.activeCredentialIds.join(', ')}"
                 }
             }
@@ -763,32 +768,45 @@ def engageWithToken(String credentialId, List targets, Set existingSet) {
                 int throttleMs = qiitaConfig.apiThrottleMs ?: 0
 
                 if (qiitaConfig.doLike && !likeAlreadyProcessed) {
-                    def likeRes = qiitaEngagementUtils.qiitaPut(qiitaConfig, env.QIITA_API_BASE, "/items/${target.id}/like")
-                    if (qiitaEngagementUtils.isSuccessCode(likeRes.code)) {
-                        likeOk = true
-                        r.liked++
-                        r.processedKeys << likeStateKey
-                        echo "[INFO] いいね実施済み state へ保存: ${likeStateKey}"
-                    } else if (likeRes.code == 409) {
+                    def selfUserId = (qiitaConfig.credentialUserIds ?: [:])[credentialId]
+
+                    if (selfUserId && target.authorId && target.authorId.toString() == selfUserId.toString()) {
                         /*
-                         * 既に like 済みなど、競合扱いを許容する場合。
+                         * 自分が書いた記事は Qiita 仕様で「いいね」できず 403 forbidden になる。
+                         * API を叩かずスキップし、state へ保存して以降の再試行を止める。
                          */
                         likeOk = true
                         r.skipped++
                         r.processedKeys << likeStateKey
-                        echo "[INFO] いいね済みまたは競合のため成功扱い・state へ保存: ${likeStateKey}"
-                    } else if (qiitaEngagementUtils.isAlreadyLikeResponse(likeRes)) {
-                        likeOk = true
-                        r.skipped++
-                        r.processedKeys << likeStateKey
-                        echo "[INFO] いいね済み（403 already_liked）のため成功扱い・state へ保存: ${likeStateKey}"
+                        echo "[INFO] 自分の記事のためいいねをスキップ・state へ保存: ${likeStateKey}"
                     } else {
-                        likeOk = false
-                        echo "[WARN] いいね失敗: credentialId=${credentialId}, id=${target.id}, HTTP=${likeRes.code}, body=${qiitaEngagementUtils.trimForLog(likeRes.rawBody)}"
-                    }
+                        def likeRes = qiitaEngagementUtils.qiitaPut(qiitaConfig, env.QIITA_API_BASE, "/items/${target.id}/like")
+                        if (qiitaEngagementUtils.isSuccessCode(likeRes.code)) {
+                            likeOk = true
+                            r.liked++
+                            r.processedKeys << likeStateKey
+                            echo "[INFO] いいね実施済み state へ保存: ${likeStateKey}"
+                        } else if (likeRes.code == 409) {
+                            /*
+                             * 既に like 済みなど、競合扱いを許容する場合。
+                             */
+                            likeOk = true
+                            r.skipped++
+                            r.processedKeys << likeStateKey
+                            echo "[INFO] いいね済みまたは競合のため成功扱い・state へ保存: ${likeStateKey}"
+                        } else if (qiitaEngagementUtils.isAlreadyLikeResponse(likeRes)) {
+                            likeOk = true
+                            r.skipped++
+                            r.processedKeys << likeStateKey
+                            echo "[INFO] いいね済み（403 already_liked）のため成功扱い・state へ保存: ${likeStateKey}"
+                        } else {
+                            likeOk = false
+                            echo "[WARN] いいね失敗: credentialId=${credentialId}, id=${target.id}, HTTP=${likeRes.code}, body=${qiitaEngagementUtils.trimForLog(likeRes.rawBody)}"
+                        }
 
-                    if (throttleMs > 0) {
-                        sleep time: throttleMs, unit: 'MILLISECONDS'
+                        if (throttleMs > 0) {
+                            sleep time: throttleMs, unit: 'MILLISECONDS'
+                        }
                     }
                 }
 
