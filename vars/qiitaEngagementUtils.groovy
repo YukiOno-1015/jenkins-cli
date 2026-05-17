@@ -268,11 +268,13 @@ def discoverOrgItemsViaAtom(Map cfg, String apiBase, String orgName) {
  * Qiita API の記事レスポンスを、エンゲージメント処理で使う共通マップへ整形する。
  */
 def toOrgItemMap(def item, String orgName) {
+    def author = (item.user instanceof Map) ? item.user : [:]
     return [
         id        : (item.id ?: '').toString(),
         title     : (item.title ?: '').toString(),
         url       : (item.url ?: '').toString(),
         org       : orgName,
+        authorId  : (author.id ?: '').toString(),
         createdAt : (item.created_at ?: '').toString(),
         updatedAt : (item.updated_at ?: '').toString(),
         privateFlg: item.private == true
